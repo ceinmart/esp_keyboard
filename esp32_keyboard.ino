@@ -6,7 +6,7 @@
 #include <Preferences.h>
 Preferences prefs;
 bool logToRsyslog = false;
-String rsyslogServer = "192.168.1.100";
+String rsyslogServer = "192.168.5.2";
 const uint16_t rsyslogPort = 514;
 WiFiUDP rsyslogUdp;
 bool usbAttached = false;
@@ -71,7 +71,7 @@ void setup() {
 
   prefs.begin("kbdcfg", false);
   logToRsyslog = prefs.getBool("logToRsyslog", false);
-  rsyslogServer = prefs.getString("rsyslogServer", "192.168.1.100");
+  rsyslogServer = prefs.getString("rsyslogServer", "192.168.5.2");
 
   // Inicializa o USB HID Keyboard
   // Certifique-se de que seu ESP32-S3 está configurado para USB CDC e HID
@@ -267,7 +267,7 @@ void loop() {
       // Restaura configurações padrão e limpa prefs
       prefs.clear();
       logToRsyslog = false;
-      rsyslogServer = "192.168.1.100";
+      rsyslogServer = "192.168.5.2";
       prefs.putBool("logToRsyslog", logToRsyslog);
       prefs.putString("rsyslogServer", rsyslogServer);
   logMsg("Configurações reiniciadas para o padrão.");
