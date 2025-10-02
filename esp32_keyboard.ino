@@ -19,6 +19,8 @@
 #include <USBHIDKeyboard.h>
 #include <Preferences.h>
 #include "esp_system.h"
+// Configuração WiFi externa
+#include "wifi_config.h"
 // OTA
 #include <ArduinoOTA.h>
 // Configuration structure
@@ -182,9 +184,9 @@ USBHIDKeyboard Keyboard;
 // OTA control flag
 bool otaEnabled = false;
 
-// Substitua pelas suas credenciais de WiFi
-const char* ssid = "dmartins";
-const char* password = "192@dmartins";
+// Credenciais agora em wifi_config.h
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 
 // Porta para o servidor TCP
 const uint16_t port = 1234;
