@@ -1,5 +1,5 @@
 //TODO: adicionar no codigo tags de versão e data/hora de compilação e revisão do git, exibir estas informações no comando de status.
-//TODO: adicionar a configuração do wifi no prefs , mantendo os valores atuais como default.
+//TODO OK : adicionar a configuração do wifi no prefs , mantendo os valores atuais como default.
 //TODO: como fazer update via OTA
 //TODO: opcão de salvar templates de escritas a serem enviadas e então chamar o template via comando
 
@@ -19,6 +19,8 @@
 #include <USBHIDKeyboard.h>
 #include <Preferences.h>
 #include "esp_system.h"
+// OTA
+#include <ArduinoOTA.h>
 // Configuration structure
 // Circular buffer for TCP output
 const int TCP_BUFFER_SIZE = 50;
@@ -177,6 +179,8 @@ void logMsg(const String &msg) {
   if (config.logToRsyslog) sendToRsyslog(msg);
 }
 USBHIDKeyboard Keyboard;
+// OTA control flag
+bool otaEnabled = false;
 
 // Substitua pelas suas credenciais de WiFi
 const char* ssid = "dmartins";
@@ -426,6 +430,16 @@ void loop() {
     if (command.startsWith(":press ")) {
       String keyStr = command.substring(7);
       handlePressCommand(keyStr);
+    } else if (command == ":cmd ota") {
+      if (!otaEnabled) {
+        otaEnabled = true;
+        ArduinoOTA.setHostname(config.hostname.c_str());
+        ArduinoOTA.begin();
+        logMsg("OTA habilitado! Você pode enviar o firmware usando:");
+        logMsg(String("python espota.py -i ") + WiFi.localIP().toString() + " -p 3232 --file esp32_keyboard.ino.bin");
+      } else {
+        logMsg("OTA já está habilitado.");
+      }
     } else if (command == ":cmd logto on") {
         config.logToRsyslog = true;
         saveConfig();
@@ -583,6 +597,10 @@ void loop() {
     }
   }
 
+  // Se OTA estiver habilitado, rode o handler
+  if (otaEnabled) {
+    ArduinoOTA.handle();
+  }
   // Pequeno atraso para evitar sobrecarga da CPU
   delay(10);
 }
