@@ -14,7 +14,8 @@ bool usbAttached = false;
 void sendToRsyslog(String msg) {
   if (!logToRsyslog) return;
   rsyslogUdp.beginPacket(rsyslogServer.c_str(), rsyslogPort);
-  rsyslogUdp.write(msg.c_str());
+  // WiFiUDP::write has an overload that accepts a uint8_t* buffer and length
+  rsyslogUdp.write((const uint8_t*)msg.c_str(), msg.length());
   rsyslogUdp.endPacket();
 }
 
@@ -104,7 +105,7 @@ void loop() {
   logMsg("Cliente existente desconectado.");
       client.stop();
     }
-    client = tcpServer.available();
+  client = tcpServer.accept();
   logMsg("Novo cliente conectado!");
   }
 
@@ -223,7 +224,6 @@ void loop() {
       if (usbAttached) {
         // Stop HID and USB
         Keyboard.end();
-        USB.end();
         usbAttached = false;
         logMsg("USB HID desconectado (DETACH).\n");
       } else {
@@ -231,7 +231,12 @@ void loop() {
       }
     } else if (command == "CMD:USB:ATTACH" || command == "CMD:RECONNECT") {
       if (!usbAttached) {
+        // Attempt to (re)initialize USB if available, then start keyboard
+        // Some ESP32 cores expose USB.begin(), others manage USB automatically.
+        // Calling Keyboard.begin() is the essential step for HID.
+        #if defined(USB)
         USB.begin();
+        #endif
         Keyboard.begin();
         usbAttached = true;
         logMsg("USB HID reconectado (ATTACH).\n");
@@ -241,11 +246,12 @@ void loop() {
     } else if (command == "CMD:USB:TOGGLE" || command == "CMD:TOGGLEUSB") {
       if (usbAttached) {
         Keyboard.end();
-        USB.end();
         usbAttached = false;
         logMsg("USB HID toggled -> DISCONNECTED.");
       } else {
+        #if defined(USB)
         USB.begin();
+        #endif
         Keyboard.begin();
         usbAttached = true;
         logMsg("USB HID toggled -> CONNECTED.");
