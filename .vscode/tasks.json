@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Enviar OTA (espota.py)",
+			"type": "shell",
+			"command": "python espota.py -i ${command:otaDeviceIp} -p 3232 --file build/esp32_keyboard.ino.bin",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

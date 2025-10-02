@@ -363,34 +363,38 @@ void setup() {
 
 void processCommand(const String &command) {
     // Process a command from any source (TCP or MQTT)
-  if (command.startsWith("press:")) {
-    handlePressCommand(command.substring(6));
-  } else if (command.startsWith(":cmd")) {
-    // forward to main loop handler by writing into same processing path
-    // For simplicity, reuse normalizeCommand and then process inline
-    String c = normalizeCommand(command);
-    // emulate a received TCP command by calling the main processing block
-    // We'll just handle a few commands here; others are processed in loop path
-    if (c == ":cmd reboot") {
-      logMsg("Reiniciando ESP32...");
-      delay(100);
-      ESP.restart();
-    } else if (c == ":cmd status") {
-      // delegate to same status code as in loop
-      // Build a fake client command
-      // (simpler approach: call the status code directly)
-      unsigned long uptime = millis() - config.bootTime;
-      unsigned long uptimeSec = uptime / 1000;
-      unsigned long uptimeMin = uptimeSec / 60;
-      unsigned long uptimeHour = uptimeMin / 60;
-      uptimeMin %= 60; uptimeSec %= 60;
-      logMsg("--- STATUS ---");
-      logMsg(String("Hostname: ") + config.hostname);
-      logMsg(String("WiFi IP: ") + WiFi.localIP().toString());
-      logMsg(String("Uptime: ") + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s");
-      logMsg(String("Free heap: ") + String(ESP.getFreeHeap()) + " bytes");
-      logMsg(String("Reset reason: ") + String(esp_reset_reason()));
-    }
+    if (command.startsWith("press:")) {
+      handlePressCommand(command.substring(6));
+    } else if (command.startsWith(":cmd")) {
+      // Evita digitar comandos inválidos como ':cmd', ':cmd:', ':cmd '
+      if (command == ":cmd" || command == ":cmd:" || command == ":cmd ") {
+        logMsg("Comando inválido ou incompleto. Use ':cmd help' para ver opções.");
+      } else {
+        // forward to main loop handler by writing into same processing path
+        // For simplicity, reuse normalizeCommand and then process inline
+        String c = normalizeCommand(command);
+        // emulate a received TCP command by calling the main processing block
+        // We'll just handle a few commands here; others are processed in loop path
+        if (c == ":cmd reboot") {
+          logMsg("Reiniciando ESP32...");
+          delay(100);
+          ESP.restart();
+        } else if (c == ":cmd status") {
+          // delegate to same status code as in loop
+          // Build a fake client command
+          // (simpler approach: call the status code directly)
+          unsigned long uptime = millis() - config.bootTime;
+          unsigned long uptimeSec = uptime / 1000;
+          unsigned long uptimeMin = uptimeSec / 60;
+          unsigned long uptimeHour = uptimeMin / 60;
+          uptimeMin %= 60; uptimeSec %= 60;
+          logMsg("--- STATUS ---");
+          logMsg(String("Hostname: ") + config.hostname);
+          logMsg(String("WiFi IP: ") + WiFi.localIP().toString());
+          logMsg(String("Uptime: ") + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s");
+          logMsg(String("Free heap: ") + String(ESP.getFreeHeap()) + " bytes");
+          logMsg(String("Reset reason: ") + String(esp_reset_reason()));
+        }
   } else {
     // type text
     processAndType(command);
