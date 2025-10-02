@@ -18,6 +18,7 @@
 #include <USB.h>
 #include <USBHIDKeyboard.h>
 #include <Preferences.h>
+#include "esp_system.h"
 // Configuration structure
 // Circular buffer for TCP output
 const int TCP_BUFFER_SIZE = 50;
@@ -60,13 +61,13 @@ struct Config {
     uint8_t rsyslogMaxRetries;  // Maximum number of retries before disabling
     
     // MQTT Configuration
-    bool mqttEnabled;
-    String mqttServer;
-    uint16_t mqttPort;
-    String mqttUser;
-    String mqttPassword;
-    String mqttPrefix;  // Topic prefix for Home Assistant
+  // (no MQTT in this branch)
 } config;
+
+// WiFi reconnect helpers
+unsigned long lastWifiReconnectAttempt = 0;
+const unsigned long WIFI_RECONNECT_INTERVAL = 10000; // try every 10s
+bool wifiWasConnected = false;
 
 struct RsyslogState {
     bool enabled;
@@ -82,82 +83,7 @@ WiFiUDP rsyslogUdp;
 bool usbAttached = false;
 
 // Load configuration from Preferences
-// MQTT callback when messages are received
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    String msg;
-    for (unsigned int i = 0; i < length; i++) {
-        msg += (char)payload[i];
-    }
-    msg.trim();
-    
-    if (String(topic) == mqttCommandTopic) {
-        // Process command as if it came from TCP
-        logMsg(String("MQTT command: ") + msg);
-        processCommand(msg);
-    }
-}
-
-// Publish MQTT discovery config for Home Assistant
-void publishMqttDiscovery() {
-    if (!config.mqttEnabled || !mqtt.connected()) return;
-    
-    String configPayload = "{\
-        \"name\": \"" + config.hostname + "\",\
-        \"unique_id\": \"esp32kbd_" + String((uint32_t)ESP.getEfuseMac(), HEX) + "\",\
-        \"command_topic\": \"" + String(mqttCommandTopic) + "\",\
-        \"state_topic\": \"" + String(mqttStatusTopic) + "\",\
-        \"availability_topic\": \"" + String(mqttAvailability) + "\",\
-        \"payload_available\": \"online\",\
-        \"payload_not_available\": \"offline\",\
-        \"device\": {\
-            \"identifiers\": [\"esp32kbd_" + String((uint32_t)ESP.getEfuseMac(), HEX) + "\"],\
-            \"name\": \"ESP32 Keyboard\",\
-            \"model\": \"ESP32-S3 USB HID\",\
-            \"manufacturer\": \"DIY\"\
-        }\
-    }";
-    
-    mqtt.publish(mqttConfigTopic, configPayload.c_str(), true);
-    mqtt.publish(mqttAvailability, "online", true);
-}
-
-// Connect/reconnect to MQTT broker
-bool connectMqtt() {
-    if (!config.mqttEnabled) return false;
-    
-    if (mqtt.connected()) return true;
-    
-    mqtt.setServer(config.mqttServer.c_str(), config.mqttPort);
-    mqtt.setCallback(mqttCallback);
-    
-    String clientId = "ESP32KBD-";
-    clientId += String((uint32_t)ESP.getEfuseMac(), HEX);
-    
-    bool success = false;
-    if (config.mqttUser.length() > 0) {
-        success = mqtt.connect(clientId.c_str(), 
-                             config.mqttUser.c_str(),
-                             config.mqttPassword.c_str(),
-                             mqttAvailability,
-                             0,
-                             true,
-                             "offline");
-    } else {
-        success = mqtt.connect(clientId.c_str(),
-                             mqttAvailability,
-                             0,
-                             true,
-                             "offline");
-    }
-    
-    if (success) {
-        mqtt.subscribe(mqttCommandTopic);
-        publishMqttDiscovery();
-        logMsg("MQTT conectado");
-    }
-    
-    return success;
-}
+// MQTT support removed in this variant
 
 void loadConfig() {
     if (!prefs.begin("kbdcfg", false)) {
@@ -169,13 +95,7 @@ void loadConfig() {
     config.hostname = prefs.getString("hostname", "esp32kbd");
     config.rsyslogMaxRetries = prefs.getUChar("rsyslogRetries", 3);
     
-    // Load MQTT config
-    config.mqttEnabled = prefs.getBool("mqttEnabled", false);
-    config.mqttServer = prefs.getString("mqttServer", "");
-    config.mqttPort = prefs.getUShort("mqttPort", 1883);
-    config.mqttUser = prefs.getString("mqttUser", "");
-    config.mqttPassword = prefs.getString("mqttPass", "");
-    config.mqttPrefix = prefs.getString("mqttPrefix", "homeassistant");
+  // No MQTT configuration in this build
     
     prefs.end();
     
@@ -196,13 +116,7 @@ void saveConfig() {
     prefs.putString("rsyslogServer", config.rsyslogServer);
     prefs.putString("hostname", config.hostname);
     
-    // Save MQTT config
-    prefs.putBool("mqttEnabled", config.mqttEnabled);
-    prefs.putString("mqttServer", config.mqttServer);
-    prefs.putUShort("mqttPort", config.mqttPort);
-    prefs.putString("mqttUser", config.mqttUser);
-    prefs.putString("mqttPass", config.mqttPassword);
-    prefs.putString("mqttPrefix", config.mqttPrefix);
+  // No MQTT configuration to save in this build
     
     prefs.end();
     logMsg("Configuration saved");
@@ -276,6 +190,76 @@ void pressAndRelease(uint8_t k) {
   Keyboard.releaseAll();
 }
 
+// Convert esp reset reason to string
+const char* resetReasonToString(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_UNKNOWN: return "UNKNOWN";
+    case ESP_RST_POWERON: return "POWERON";
+    case ESP_RST_EXT: return "EXTERNAL";
+    case ESP_RST_SW: return "SOFTWARE";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT_WDT";
+    case ESP_RST_TASK_WDT: return "TASK_WDT";
+    case ESP_RST_WDT: return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "OTHER";
+  }
+}
+
+// Robust PRESS handler: supports modifiers separated by '+' (e.g. ctrl+alt+del)
+void handlePressCommand(String keyStr) {
+  keyStr.trim();
+  String s = keyStr;
+  s.toUpperCase();
+
+  bool pressCtrl=false, pressShift=false, pressAlt=false, pressWin=false;
+  String main;
+  // split by +
+  int p;
+  while ((p = s.indexOf('+')) >= 0) {
+    String part = s.substring(0, p);
+    part.trim();
+    if (part == "CTRL" || part == "CONTROL") pressCtrl = true;
+    else if (part == "SHIFT") pressShift = true;
+    else if (part == "ALT") pressAlt = true;
+    else if (part == "WIN" || part == "GUI") pressWin = true;
+    // else could be other modifiers
+    s = s.substring(p+1);
+  }
+  s.trim();
+  main = s;
+
+  uint8_t code = 0;
+  if (main.length() == 1) {
+    code = main.charAt(0);
+  } else if (main == "ENTER") code = KEY_RETURN;
+  else if (main == "TAB") code = KEY_TAB;
+  else if (main == "ESC" || main == "ESCAPE") code = KEY_ESC;
+  else if (main == "BACKSPACE") code = KEY_BACKSPACE;
+  else if (main == "DELETE") code = KEY_DELETE;
+  else if (main == "SPACE") code = ' ';
+  else if (main == "UP" || main == "UPARROW") code = KEY_UP_ARROW;
+  else if (main == "DOWN" || main == "DOWNARROW") code = KEY_DOWN_ARROW;
+  else if (main == "LEFT" || main == "LEFTARROW") code = KEY_LEFT_ARROW;
+  else if (main == "RIGHT" || main == "RIGHTARROW") code = KEY_RIGHT_ARROW;
+  else if (main.startsWith("F") && main.length() <= 3) {
+    int fn = main.substring(1).toInt();
+    if (fn >=1 && fn <= 12) code = KEY_F1 + (fn - 1);
+  }
+
+  // Press modifiers
+  if (pressCtrl) Keyboard.press(KEY_LEFT_CTRL);
+  if (pressShift) Keyboard.press(KEY_LEFT_SHIFT);
+  if (pressAlt) Keyboard.press(KEY_LEFT_ALT);
+  if (pressWin) Keyboard.press(KEY_LEFT_GUI);
+
+  if (code) Keyboard.press(code);
+  Keyboard.releaseAll();
+  logMsg(String("Pressionado: ") + keyStr);
+}
+
 // Convert old CMD: style commands to new :cmd style
 String normalizeCommand(const String &cmd) {
     String normalized = cmd;
@@ -285,6 +269,14 @@ String normalizeCommand(const String &cmd) {
     if (normalized.startsWith("cmd:")) {
         normalized = ":cmd " + normalized.substring(4);
     }
+
+  // Convert legacy press: and type: to :press and :type
+  if (normalized.startsWith("press:")) {
+    normalized = ":press " + normalized.substring(6);
+  }
+  if (normalized.startsWith("type:")) {
+    normalized = ":type " + normalized.substring(5);
+  }
     
     // Convert specific old commands to new format
     if (normalized == ":cmd logto:on") normalized = ":cmd logto on";
@@ -358,30 +350,42 @@ void setup() {
 
 void processCommand(const String &command) {
     // Process a command from any source (TCP or MQTT)
-    if (command.startsWith("press:")) {
-        // ... existing press handling ...
-    } else if (command.startsWith(":cmd")) {
-        // ... existing command handling ...
-    } else {
-        // ... existing default type handling ...
+  if (command.startsWith("press:")) {
+    handlePressCommand(command.substring(6));
+  } else if (command.startsWith(":cmd")) {
+    // forward to main loop handler by writing into same processing path
+    // For simplicity, reuse normalizeCommand and then process inline
+    String c = normalizeCommand(command);
+    // emulate a received TCP command by calling the main processing block
+    // We'll just handle a few commands here; others are processed in loop path
+    if (c == ":cmd reboot") {
+      logMsg("Reiniciando ESP32...");
+      delay(100);
+      ESP.restart();
+    } else if (c == ":cmd status") {
+      // delegate to same status code as in loop
+      // Build a fake client command
+      // (simpler approach: call the status code directly)
+      unsigned long uptime = millis() - config.bootTime;
+      unsigned long uptimeSec = uptime / 1000;
+      unsigned long uptimeMin = uptimeSec / 60;
+      unsigned long uptimeHour = uptimeMin / 60;
+      uptimeMin %= 60; uptimeSec %= 60;
+      logMsg("--- STATUS ---");
+      logMsg(String("Hostname: ") + config.hostname);
+      logMsg(String("WiFi IP: ") + WiFi.localIP().toString());
+      logMsg(String("Uptime: ") + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s");
+      logMsg(String("Free heap: ") + String(ESP.getFreeHeap()) + " bytes");
+      logMsg(String("Reset reason: ") + String(esp_reset_reason()));
     }
+  } else {
+    // type text
+    processAndType(command);
+  }
 }
 
 void loop() {
-    // Handle MQTT connection/messages
-    if (config.mqttEnabled) {
-        if (!mqtt.connected()) {
-            connectMqtt();
-        }
-        mqtt.loop();
-    }
-  // Handle MQTT connection/messages
-  if (config.mqttEnabled) {
-    if (!mqtt.connected()) {
-      connectMqtt();
-    }
-    mqtt.loop();
-  }
+  // (no MQTT in this build) 
   
   // Verifica se há um novo cliente tentando se conectar
   if (tcpServer.hasClient()) {
@@ -412,78 +416,9 @@ void loop() {
     // Processa o comando e emula a digitação
     command = normalizeCommand(command);
     
-    if (command.startsWith("press:")) {
-      String keyStr = command.substring(6);
-      if (keyStr == "ENTER") {
-        Keyboard.press(KEY_RETURN);
-        Keyboard.releaseAll();
-  logMsg("Pressionado: ENTER");
-      } else if (keyStr == "TAB") {
-        Keyboard.press(KEY_TAB);
-        Keyboard.releaseAll();
-  logMsg("Pressionado: TAB");
-      } else if (keyStr == "ESC") {
-        Keyboard.press(KEY_ESC);
-        Keyboard.releaseAll();
-  logMsg("Pressionado: ESC");
-      } else if (keyStr == "BACKSPACE") {
-        Keyboard.press(KEY_BACKSPACE);
-        Keyboard.releaseAll();
-  logMsg("Pressionado: BACKSPACE");
-      } else if (keyStr == "DELETE") {
-        Keyboard.press(KEY_DELETE);
-        Keyboard.releaseAll();
-  logMsg("Pressionado: DELETE");
-      } else if (keyStr == "SPACE") {
-        Keyboard.press(' ');
-        Keyboard.releaseAll();
-  logMsg("Pressionado: SPACE");
-      } else if (keyStr == "WIN") {
-        Keyboard.press(KEY_LEFT_GUI);
-        Keyboard.releaseAll();
-  logMsg("Pressionado: WIN");
-      } else if (keyStr.startsWith("WIN+")) {
-        String modKey = keyStr.substring(4);
-        Keyboard.press(KEY_LEFT_GUI);
-        if (modKey.length() == 1) {
-          Keyboard.press(modKey.charAt(0));
-        }
-        Keyboard.releaseAll();
-  logMsg(String("Pressionado: WIN+") + modKey);
-      } else if (keyStr.startsWith("CTRL+")) {
-        String modKey = keyStr.substring(5);
-        Keyboard.press(KEY_LEFT_CTRL);
-        if (modKey.length() == 1) {
-          Keyboard.press(modKey.charAt(0));
-        } else if (modKey == "ALT") {
-          Keyboard.press(KEY_LEFT_ALT);
-        } // Adicione mais combinações se necessário
-        Keyboard.releaseAll();
-  logMsg(String("Pressionado: CTRL+") + modKey);
-      } else if (keyStr.startsWith("ALT+")) {
-        String modKey = keyStr.substring(4);
-        Keyboard.press(KEY_LEFT_ALT);
-        if (modKey.length() == 1) {
-          Keyboard.press(modKey.charAt(0));
-        }
-        Keyboard.releaseAll();
-  logMsg(String("Pressionado: ALT+") + modKey);
-      } else if (keyStr.startsWith("SHIFT+")) {
-        String modKey = keyStr.substring(6);
-        Keyboard.press(KEY_LEFT_SHIFT);
-        if (modKey.length() == 1) {
-          Keyboard.press(modKey.charAt(0));
-        }
-        Keyboard.releaseAll();
-  logMsg(String("Pressionado: SHIFT+") + modKey);
-      } else if (keyStr.length() == 1) {
-        // Para caracteres únicos (letras, números, símbolos)
-        Keyboard.press(keyStr.charAt(0));
-        Keyboard.releaseAll();
-  logMsg(String("Pressionado: ") + keyStr.charAt(0));
-      } else {
-  logMsg(String("Comando PRESS desconhecido: ") + keyStr);
-      }
+    if (command.startsWith(":press ")) {
+      String keyStr = command.substring(7);
+      handlePressCommand(keyStr);
     } else if (command == ":cmd logto on") {
         config.logToRsyslog = true;
         saveConfig();
@@ -493,20 +428,7 @@ void loop() {
         saveConfig();
         logMsg("Log para rsyslog desativado.");
     } else if (command.startsWith(":cmd logto ")) {
-        logMsg("Opção inválida para logto. Use on ou off.");
-      opt.trim();
-      if (opt == "on") {
-        config.logToRsyslog = true;
-        saveConfig();
-        logMsg("Log para rsyslog ativado.");
-      } else if (opt == "off") {
-        config.logToRsyslog = false;
-        saveConfig();
-        logMsg("Log para rsyslog desativado.");
-        // Not sending to rsyslog because it's disabled
-      } else {
-        logMsg("Opção inválida para LOGTO. Use on ou off.");
-      }
+        logMsg("Opção inválida para logto. Use ':cmd logto on' ou ':cmd logto off'.");
     } else if (command.startsWith(":cmd rsyslog ")) {
       String server = command.substring(12);
       server.trim();
@@ -537,9 +459,21 @@ void loop() {
                 rsyslog.failedAttempts > 0 ? String("RETRY (") + rsyslog.failedAttempts + "/" + config.rsyslogMaxRetries + ")" :
                 "OK"));
       }
+      // Diagnostics
+      logMsg(String("Reset reason: ") + String(esp_reset_reason()));
+      logMsg(String("Free heap: ") + String(ESP.getFreeHeap()) + " bytes");
       logMsg("---------------");
     } else if (command == ":cmd reset") {
-      // USB detach/attach commands
+      // Restaura configurações padrão e limpa prefs
+      prefs.begin("kbdcfg", false);
+      prefs.clear();
+      prefs.end();
+      config.logToRsyslog = false;
+      config.rsyslogServer = "192.168.5.2";
+      config.hostname = "esp32kbd";
+      saveConfig();
+      logMsg("Configurações reiniciadas para o padrão.");
+      logMsg("Config: RESET to defaults");
     } else if (command == ":cmd usb detach" || command == ":cmd disconnect") {
       if (usbAttached) {
         // Stop HID and USB
@@ -576,48 +510,7 @@ void loop() {
         usbAttached = true;
         logMsg("USB HID toggled -> CONNECTED.");
       }
-    } else if (command == ":cmd mqtt status") {
-        logMsg("--- MQTT Status ---");
-        logMsg(String("Enabled: ") + (config.mqttEnabled ? "yes" : "no"));
-        if (config.mqttEnabled) {
-            logMsg(String("Server: ") + config.mqttServer + ":" + config.mqttPort);
-            logMsg(String("Connected: ") + (mqtt.connected() ? "yes" : "no"));
-            logMsg(String("Username: ") + (config.mqttUser.length() > 0 ? config.mqttUser : "<none>"));
-        }
-    } else if (command.startsWith(":cmd mqtt server ")) {
-        String server = command.substring(16);
-        int portPos = server.indexOf(":");
-        if (portPos > 0) {
-            config.mqttPort = server.substring(portPos + 1).toInt();
-            config.mqttServer = server.substring(0, portPos);
-        } else {
-            config.mqttServer = server;
-            config.mqttPort = 1883;
-        }
-        saveConfig();
-        logMsg(String("MQTT server configurado: ") + config.mqttServer + ":" + config.mqttPort);
-    } else if (command.startsWith(":cmd mqtt auth ")) {
-        String auth = command.substring(14);
-        int sepPos = auth.indexOf(" ");
-        if (sepPos > 0) {
-            config.mqttUser = auth.substring(0, sepPos);
-            config.mqttPassword = auth.substring(sepPos + 1);
-            saveConfig();
-            logMsg("MQTT credentials configuradas");
-        } else {
-            logMsg("Formato: :cmd mqtt auth <username> <password>");
-        }
-    } else if (command == ":cmd mqtt enable") {
-        config.mqttEnabled = true;
-        saveConfig();
-        connectMqtt();
-        logMsg("MQTT enabled");
-    } else if (command == ":cmd mqtt disable") {
-        config.mqttEnabled = false;
-        if (mqtt.connected()) mqtt.disconnect();
-        saveConfig();
-        logMsg("MQTT disabled");
-    } else if (command.startsWith(":cmd hostname ")) {
+  } else if (command.startsWith(":cmd hostname ")) {
       String newHostname = command.substring(13);
       newHostname.trim();
       if (newHostname.length() > 0 && newHostname.length() <= 32) {
@@ -636,16 +529,12 @@ void loop() {
     } else if (command == ":cmd help") {
       // Show help with available commands
       logMsg("--- HELP: Comandos Disponíveis ---");
-      logMsg("press:<key>         - Pressiona uma tecla (enter,tab,esc,backspace,delete,space,win,ctrl+,alt,shift)");
-      logMsg("type:<text>         - Digita o texto (use \\n for ENTER escape, \\\\ for backslash)");
+  logMsg(":press <key>         - Pressiona uma tecla (enter,tab,esc,backspace,delete,space,win,ctrl+,alt,shift)");
+  logMsg(":type <text>          - Digita o texto (use \\n for ENTER escape, \\\\ for backslash)");
       logMsg(":cmd logto on|off   - Habilita/desabilita log para rsyslog");
       logMsg(":cmd rsyslog <ip>   - Define servidor rsyslog");
       logMsg(":cmd hostname <name> - Define o hostname do dispositivo");
-      logMsg(":cmd mqtt status    - Mostra status do MQTT");
-      logMsg(":cmd mqtt enable    - Habilita MQTT");
-      logMsg(":cmd mqtt disable   - Desabilita MQTT");
-      logMsg(":cmd mqtt server    - Define servidor MQTT (host:port)");
-      logMsg(":cmd mqtt auth      - Define credenciais MQTT (user pass)");
+  // MQTT commands removed in this build
       logMsg(":cmd status         - Mostra status atual");
       logMsg(":cmd reset          - Restaura configurações padrão");
       logMsg(":cmd usb detach     - Desconecta o HID USB");
@@ -654,20 +543,21 @@ void loop() {
       logMsg(":cmd reboot         - Reinicia o ESP32");
       logMsg(":cmd help           - Mostra esta ajuda");
       logMsg("----------------------------------");
-      // Restaura configurações padrão e limpa prefs
-      prefs.clear();
-      logToRsyslog = false;
-      rsyslogServer = "192.168.5.2";
-      prefs.putBool("logToRsyslog", logToRsyslog);
-      prefs.putString("rsyslogServer", rsyslogServer);
+    // Restaura configurações padrão e limpa prefs
+    prefs.begin("kbdcfg", false);
+    prefs.clear();
+    prefs.end();
+    config.logToRsyslog = false;
+    config.rsyslogServer = "192.168.5.2";
+    saveConfig();
   logMsg("Configurações reiniciadas para o padrão.");
   logMsg("Config: RESET to defaults");
     } else {
-      // Qualquer outro texto (sem necessidade de TYPE:) será digitado
+      // Qualquer outro texto (sem necessidade de :type) será digitado
       String textToType = command;
       // Se a string começar com TYPE:, também deve funcionar
-      if (textToType.startsWith("TYPE:")) {
-        textToType = textToType.substring(5);
+      if (textToType.startsWith(":type ")) {
+        textToType = textToType.substring(6);
       }
       processAndType(textToType);
   logMsg(String("Digitando: ") + textToType);
