@@ -9,6 +9,7 @@ bool logToRsyslog = false;
 String rsyslogServer = "192.168.1.100";
 const uint16_t rsyslogPort = 514;
 WiFiUDP rsyslogUdp;
+bool usbAttached = false;
 
 void sendToRsyslog(String msg) {
   if (!logToRsyslog) return;
@@ -76,6 +77,7 @@ void setup() {
   // Certifique-se de que seu ESP32-S3 está configurado para USB CDC e HID
   USB.begin();
   Keyboard.begin();
+  usbAttached = true;
 
   Serial.print("Conectando ao WiFi ");
   Serial.println(ssid);
@@ -216,6 +218,52 @@ void loop() {
   logMsg(String("Rsyslog server: ") + rsyslogServer);
   logMsg("---------------");
     } else if (command == "CMD:RESET") {
+      // USB detach/attach commands
+    } else if (command == "CMD:USB:DETACH" || command == "CMD:DISCONNECT") {
+      if (usbAttached) {
+        // Stop HID and USB
+        Keyboard.end();
+        USB.end();
+        usbAttached = false;
+        logMsg("USB HID desconectado (DETACH).\n");
+      } else {
+        logMsg("USB já está desconectado.");
+      }
+    } else if (command == "CMD:USB:ATTACH" || command == "CMD:RECONNECT") {
+      if (!usbAttached) {
+        USB.begin();
+        Keyboard.begin();
+        usbAttached = true;
+        logMsg("USB HID reconectado (ATTACH).\n");
+      } else {
+        logMsg("USB já está conectado.");
+      }
+    } else if (command == "CMD:USB:TOGGLE" || command == "CMD:TOGGLEUSB") {
+      if (usbAttached) {
+        Keyboard.end();
+        USB.end();
+        usbAttached = false;
+        logMsg("USB HID toggled -> DISCONNECTED.");
+      } else {
+        USB.begin();
+        Keyboard.begin();
+        usbAttached = true;
+        logMsg("USB HID toggled -> CONNECTED.");
+      }
+    } else if (command == "CMD:HELP") {
+      // Show help with available commands
+      logMsg("--- HELP: Comandos Disponíveis ---");
+      logMsg("PRESS:<KEY>       - Pressiona uma tecla (ENTER,TAB,ESC,BACKSPACE,DELETE,SPACE,WIN,CTRL+,ALT,SHIFT)");
+      logMsg("TYPE:<text>       - Digita o texto (use \\n for ENTER escape, \\\\ for backslash)");
+      logMsg("CMD:LOGTO:on|off  - Habilita/desabilita log para rsyslog");
+      logMsg("CMD:RSYSLOG:<ip>  - Define servidor rsyslog");
+      logMsg("CMD:STATUS        - Mostra status atual");
+      logMsg("CMD:RESET         - Restaura configurações padrão");
+      logMsg("CMD:USB:DETACH or CMD:DISCONNECT - Desconecta o HID USB");
+      logMsg("CMD:USB:ATTACH or CMD:RECONNECT  - Reconnecta o HID USB");
+      logMsg("CMD:USB:TOGGLE or CMD:TOGGLEUSB  - Alterna estado USB");
+      logMsg("CMD:HELP          - Mostra esta ajuda");
+      logMsg("----------------------------------");
       // Restaura configurações padrão e limpa prefs
       prefs.clear();
       logToRsyslog = false;
