@@ -176,9 +176,12 @@ void handleRsyslogError(const char* error) {
   }
 }
 
-void logMsg(const String &msg) {
+void logMsg(const String &msg, WiFiClient* tcp = nullptr) {
   Serial.println(msg);
   outputBuffer.add(msg);  // Store in circular buffer for TCP clients
+  if (tcp && tcp->connected()) {
+    tcp->println(msg);
+  }
   if (config.logToRsyslog) sendToRsyslog(msg);
 }
 USBHIDKeyboard Keyboard;
@@ -367,39 +370,50 @@ void processCommand(const String &command) {
     if (command.startsWith("press:")) {
       handlePressCommand(command.substring(6));
     } else if (command.startsWith(":cmd")) {
-      // Evita digitar comandos inválidos como ':cmd', ':cmd:', ':cmd '
+      WiFiClient* tcp = (client && client.connected()) ? &client : nullptr;
       if (command == ":cmd" || command == ":cmd:" || command == ":cmd ") {
-        logMsg("Comando inválido ou incompleto. Use ':cmd help' para ver opções.");
+        logMsg("Comando inválido ou incompleto. Use ':cmd help' para ver opções.", tcp);
       } else {
-        // forward to main loop handler by writing into same processing path
-        // For simplicity, reuse normalizeCommand and then process inline
         String c = normalizeCommand(command);
-        // emulate a received TCP command by calling the main processing block
-        // We'll just handle a few commands here; others are processed in loop path
         if (c == ":cmd reboot") {
-          logMsg("Reiniciando ESP32...");
+          logMsg("Reiniciando ESP32...", tcp);
           delay(100);
           ESP.restart();
         } else if (c == ":cmd status") {
-          // delegate to same status code as in loop
-          // Build a fake client command
-          // (simpler approach: call the status code directly)
           unsigned long uptime = millis() - config.bootTime;
           unsigned long uptimeSec = uptime / 1000;
           unsigned long uptimeMin = uptimeSec / 60;
           unsigned long uptimeHour = uptimeMin / 60;
           uptimeMin %= 60; uptimeSec %= 60;
-          logMsg("--- STATUS ---");
-          logMsg(String("Hostname: ") + config.hostname);
-          logMsg(String("WiFi IP: ") + WiFi.localIP().toString());
-          logMsg(String("Uptime: ") + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s");
-          logMsg(String("Free heap: ") + String(ESP.getFreeHeap()) + " bytes");
-          logMsg(String("Reset reason: ") + String(esp_reset_reason()));
+          logMsg("--- STATUS ---", tcp);
+          logMsg(String("Hostname: ") + config.hostname, tcp);
+          logMsg(String("WiFi IP: ") + WiFi.localIP().toString(), tcp);
+          logMsg(String("Uptime: ") + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s", tcp);
+          logMsg(String("Free heap: ") + String(ESP.getFreeHeap()) + " bytes", tcp);
+          logMsg(String("Reset reason: ") + String(esp_reset_reason()), tcp);
+        } else if (c == ":cmd help") {
+          logMsg("--- HELP: Comandos Disponíveis ---", tcp);
+          logMsg(":press <key>         - Pressiona uma tecla (enter,tab,esc,backspace,delete,space,win,ctrl+,alt,shift)", tcp);
+          logMsg(":type <text>          - Digita o texto (use \\n para ENTER, \\\\ para barra invertida)", tcp);
+          logMsg(":cmd keydelay <ms>    - Ajusta o delay entre teclas (ms, padrão 20)", tcp);
+          logMsg(":cmd logto on|off   - Habilita/desabilita log para rsyslog", tcp);
+          logMsg(":cmd rsyslog <ip>   - Define servidor rsyslog", tcp);
+          logMsg(":cmd hostname <name> - Define o hostname do dispositivo", tcp);
+          logMsg(":cmd status         - Mostra status atual", tcp);
+          logMsg(":cmd reset          - Restaura configurações padrão", tcp);
+          logMsg(":cmd usb detach     - Desconecta o HID USB", tcp);
+          logMsg(":cmd usb attach     - Reconecta o HID USB", tcp);
+          logMsg(":cmd usb toggle     - Alterna estado USB", tcp);
+          logMsg(":cmd reboot         - Reinicia o ESP32", tcp);
+          logMsg(":cmd help           - Mostra esta ajuda", tcp);
+          logMsg("----------------------------------", tcp);
+        } else {
+          // ...existing code for other :cmd commands...
         }
-  } else {
-    // type text
-    processAndType(command);
-  }
+      }
+    } else {
+      processAndType(command);
+    }
 }
 
 void loop() {
