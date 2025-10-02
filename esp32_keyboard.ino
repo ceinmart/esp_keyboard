@@ -54,11 +54,12 @@ struct OutputBuffer {
 } outputBuffer;
 
 struct Config {
-    bool logToRsyslog;
-    String rsyslogServer;
-    String hostname;
-    unsigned long bootTime;
-    uint8_t rsyslogMaxRetries;  // Maximum number of retries before disabling
+  bool logToRsyslog;
+  String rsyslogServer;
+  String hostname;
+  unsigned long bootTime;
+  uint8_t rsyslogMaxRetries;  // Maximum number of retries before disabling
+  uint16_t keyDelayMs;        // Delay entre teclas (ms)
     
     // MQTT Configuration
   // (no MQTT in this branch)
@@ -90,10 +91,11 @@ void loadConfig() {
         logMsg("Failed to initialize Preferences");
         return;
     }
-    config.logToRsyslog = prefs.getBool("logToRsyslog", false);
-    config.rsyslogServer = prefs.getString("rsyslogServer", "192.168.5.2");
-    config.hostname = prefs.getString("hostname", "esp32kbd");
-    config.rsyslogMaxRetries = prefs.getUChar("rsyslogRetries", 3);
+  config.logToRsyslog = prefs.getBool("logToRsyslog", false);
+  config.rsyslogServer = prefs.getString("rsyslogServer", "192.168.5.2");
+  config.hostname = prefs.getString("hostname", "esp32kbd");
+  config.rsyslogMaxRetries = prefs.getUChar("rsyslogRetries", 3);
+  config.keyDelayMs = prefs.getUShort("keyDelayMs", 20);
     
   // No MQTT configuration in this build
     
@@ -112,9 +114,10 @@ void saveConfig() {
         logMsg("Failed to initialize Preferences for saving");
         return;
     }
-    prefs.putBool("logToRsyslog", config.logToRsyslog);
-    prefs.putString("rsyslogServer", config.rsyslogServer);
-    prefs.putString("hostname", config.hostname);
+  prefs.putBool("logToRsyslog", config.logToRsyslog);
+  prefs.putString("rsyslogServer", config.rsyslogServer);
+  prefs.putString("hostname", config.hostname);
+  prefs.putUShort("keyDelayMs", config.keyDelayMs);
     
   // No MQTT configuration to save in this build
     
@@ -297,19 +300,23 @@ void processAndType(const String &txt) {
       if (next == 'n') {
         pressAndRelease(KEY_RETURN);
         logMsg("Pressionado: ENTER");
+        delay(config.keyDelayMs);
         i += 2;
         continue;
       } else if (next == '\\') {
         Keyboard.print('\\');
+        delay(config.keyDelayMs);
         i += 2;
         continue;
       } else {
         Keyboard.print(next);
+        delay(config.keyDelayMs);
         i += 2;
         continue;
       }
     }
     Keyboard.print(c);
+    delay(config.keyDelayMs);
     i++;
   }
 }
@@ -510,7 +517,18 @@ void loop() {
         usbAttached = true;
         logMsg("USB HID toggled -> CONNECTED.");
       }
-  } else if (command.startsWith(":cmd hostname ")) {
+    } else if (command.startsWith(":cmd keydelay ")) {
+      String msStr = command.substring(14);
+      msStr.trim();
+      int ms = msStr.toInt();
+      if (ms >= 0 && ms <= 1000) {
+        config.keyDelayMs = ms;
+        saveConfig();
+        logMsg(String("Delay entre teclas ajustado para: ") + ms + " ms");
+      } else {
+        logMsg("Valor inválido para delay. Use entre 0 e 1000 ms.");
+      }
+    } else if (command.startsWith(":cmd hostname ")) {
       String newHostname = command.substring(13);
       newHostname.trim();
       if (newHostname.length() > 0 && newHostname.length() <= 32) {
@@ -530,7 +548,8 @@ void loop() {
       // Show help with available commands
       logMsg("--- HELP: Comandos Disponíveis ---");
   logMsg(":press <key>         - Pressiona uma tecla (enter,tab,esc,backspace,delete,space,win,ctrl+,alt,shift)");
-  logMsg(":type <text>          - Digita o texto (use \\n for ENTER escape, \\\\ for backslash)");
+  logMsg(":type <text>          - Digita o texto (use \\n para ENTER, \\\\ para barra invertida)");
+  logMsg(":cmd keydelay <ms>    - Ajusta o delay entre teclas (ms, padrão 20)");
       logMsg(":cmd logto on|off   - Habilita/desabilita log para rsyslog");
       logMsg(":cmd rsyslog <ip>   - Define servidor rsyslog");
       logMsg(":cmd hostname <name> - Define o hostname do dispositivo");
