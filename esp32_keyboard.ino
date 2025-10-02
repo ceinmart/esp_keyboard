@@ -1,3 +1,4 @@
+#include "version.h"
 //TODO: adicionar no codigo tags de versão e data/hora de compilação e revisão do git, exibir estas informações no comando de status.
 //TODO OK : adicionar a configuração do wifi no prefs , mantendo os valores atuais como default.
 //TODO: como fazer update via OTA
@@ -417,6 +418,9 @@ void loop() {
   // Send welcome message and output buffer
   client.println("=== ESP32 Keyboard Controller ===\r");
   client.println(String("Device: ") + config.hostname);
+  client.println(String("Git: commit ") + GIT_COMMIT + " | branch " + GIT_BRANCH);
+  client.println(String("Build: ") + GIT_DATE);
+  client.println(String("Path: ") + GIT_PATH);
   client.println("\r=== Últimas mensagens ===\r");
   outputBuffer.sendTo(client);
   client.println("\r=== Digite um comando ou 'help' para ajuda ===\r");
@@ -477,6 +481,9 @@ void loop() {
       logMsg(String("WiFi RSSI: ") + WiFi.RSSI() + " dBm");
       logMsg(String("Uptime: ") + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s");
       logMsg(String("USB HID: ") + (usbAttached ? "CONNECTED" : "DISCONNECTED"));
+      logMsg(String("Git: commit ") + GIT_COMMIT + " | branch " + GIT_BRANCH);
+      logMsg(String("Build: ") + GIT_DATE);
+      logMsg(String("Path: ") + GIT_PATH);
       logMsg("--- Rsyslog Config ---");
       logMsg(String("Log to rsyslog: ") + (config.logToRsyslog ? "ON" : "OFF"));
       logMsg(String("Rsyslog server: ") + config.rsyslogServer);

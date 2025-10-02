@@ -2,5 +2,6 @@
     "configuration": "USBMode=Hardware CDC and JTAG,UploadMode=USB-OTG CDC (TinyUSB),PartitionScheme=8M with spiffs (3MB APP/1.5MB SPIFFS),DebugLevel=Info,EraseFlash=Disabled",
     "board": "esp32:esp32:esp32s3usbotg",
     "sketch": "esp32_keyboard.ino",
-    "output": "./build"
+    "output": "./build",
+    "prebuild": "python gen_version.py"
 }
