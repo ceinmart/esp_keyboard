@@ -200,10 +200,11 @@ void handleRsyslogError(const char *error)
   }
 }
 
+WiFiClient client;
+
 void logMsg(const String &msg)
 {
   Serial.println(msg);
-  // Adiciona ao buffer apenas para rsyslog reconexão
   outputBuffer.add(msg);
   if (client && client.connected()) {
     client.println(msg);
@@ -222,7 +223,6 @@ const char *password = WIFI_PASSWORD;
 // Porta para o servidor TCP
 const uint16_t port = 1234;
 WiFiServer tcpServer(port);
-WiFiClient client;
 
 // Helper: press a key and release
 void pressAndRelease(uint8_t k)
@@ -535,8 +535,6 @@ void loop()
     String command = client.readStringUntil('\n');
     command.trim(); // Remove espaços em branco e caracteres de nova linha
     logMsg(String("Comando recebido: ") + command);
-
-    // ...existing code...
 
     // Processa o comando e emula a digitação
     command = normalizeCommand(command);
