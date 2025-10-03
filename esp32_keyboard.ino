@@ -61,11 +61,7 @@ struct OutputBuffer
 
   void sendTo(WiFiClient &client)
   {
-    for (int i = 0; i < count; i++)
-    {
-      int pos = (start + i) % TCP_BUFFER_SIZE;
-      client.println(lines[pos]);
-    }
+    // Não envia mais para client TCP, buffer serve só para rsyslog reconexão
   }
 } outputBuffer;
 
@@ -207,7 +203,11 @@ void handleRsyslogError(const char *error)
 void logMsg(const String &msg)
 {
   Serial.println(msg);
-  outputBuffer.add(msg); // Store in circular buffer for TCP clients
+  // Adiciona ao buffer apenas para rsyslog reconexão
+  outputBuffer.add(msg);
+  if (client && client.connected()) {
+    client.println(msg);
+  }
   if (config.logToRsyslog)
     sendToRsyslog(msg);
 }
@@ -517,18 +517,16 @@ void loop()
       logMsg("Cliente existente desconectado.");
       client.stop();
     }
-    client = tcpServer.accept();
-    logMsg("Novo cliente conectado!");
-
-    // Send welcome message and output buffer
-    client.println("=== ESP32 Keyboard Controller ===\r");
-    client.println(String("Device: ") + config.hostname);
-    client.println(String("Git: commit ") + GIT_COMMIT + " | branch " + GIT_BRANCH);
-    client.println(String("Build: ") + GIT_DATE);
-    client.println(String("Path: ") + GIT_PATH);
-    client.println("\r=== Últimas mensagens ===\r");
-    outputBuffer.sendTo(client);
-    client.println("\r=== Digite um comando ou ':cmd help' para ajuda ===\r");
+  client = tcpServer.accept();
+  logMsg("Novo cliente conectado!");
+  logMsg("=== ESP32 Keyboard Controller ===\r");
+  logMsg(String("Device: ") + config.hostname);
+  logMsg(String("Git: commit ") + GIT_COMMIT + " | branch " + GIT_BRANCH);
+  logMsg(String("Build: ") + GIT_DATE);
+  logMsg(String("Path: ") + GIT_PATH);
+  logMsg("\r=== Últimas mensagens ===\r");
+  // outputBuffer não envia mais para client TCP
+  logMsg("\r=== Digite um comando ou ':cmd help' para ajuda ===\r");
   }
 
   // Se houver um cliente conectado e dados disponíveis
