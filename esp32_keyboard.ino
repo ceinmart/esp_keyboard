@@ -97,6 +97,9 @@ const unsigned long RSYSLOG_RETRY_DELAY = 5000; // 5 seconds between retries
 WiFiUDP rsyslogUdp;
 bool usbAttached = false;
 
+// Flag para habilitar logs via Serial (detectada no boot)
+bool serialEnabled = false;
+
 // Load configuration from Preferences
 // MQTT support removed in this variant
 
@@ -175,7 +178,7 @@ void sendToRsyslog(String msg)
   if (rsyslog.failedAttempts > 0)
   {
     rsyslog.failedAttempts = 0;
-    Serial.println("Rsyslog connection restored");
+    logMsg("Rsyslog connection restored");
   }
 }
 
@@ -188,15 +191,13 @@ void handleRsyslogError(const char *error)
   {
     if (!rsyslog.temporarilyDisabled)
     {
-      Serial.printf("Rsyslog disabled after %d failed attempts: %s\n",
-                    rsyslog.failedAttempts, error);
+      logMsg(String("Rsyslog disabled after ") + rsyslog.failedAttempts + " failed attempts: " + error);
       rsyslog.temporarilyDisabled = true;
     }
   }
   else
   {
-    Serial.printf("Rsyslog error (attempt %d/%d): %s\n",
-                  rsyslog.failedAttempts, config.rsyslogMaxRetries, error);
+    logMsg(String("Rsyslog error (attempt ") + rsyslog.failedAttempts + "/" + config.rsyslogMaxRetries + "): " + error);
   }
 }
 
@@ -204,7 +205,9 @@ WiFiClient client;
 
 void logMsg(const String &msg)
 {
-  Serial.println(msg);
+  if (serialEnabled) {
+    Serial.println(msg);
+  }
   outputBuffer.add(msg);
   if (client && client.connected()) {
     client.println(msg);
@@ -417,6 +420,18 @@ void setup()
 {
   Serial.begin(115200);
 
+  // Detecta se a porta Serial foi aberta pelo host (CDC DTR)
+  unsigned long start = millis();
+  while (millis() - start < 2000)
+  {
+    if (Serial && Serial.dtr())
+    {
+      serialEnabled = true;
+      break;
+    }
+    delay(10);
+  }
+
   // Initialize configuration
   loadConfig();
   config.bootTime = millis();
@@ -433,13 +448,12 @@ void setup()
   Keyboard.begin();
   usbAttached = true;
 
-  Serial.print("Conectando ao WiFi ");
-  Serial.println(ssid);
+  logMsg(String("Conectando ao WiFi ") + ssid);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
-    Serial.print(".");
+    if (serialEnabled) Serial.print(".");
   }
   logMsg("WiFi conectado!");
   logMsg(String("Endereço IP: ") + WiFi.localIP().toString());
