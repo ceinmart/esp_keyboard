@@ -1,0 +1,20 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Enviar OTA (espota.py)",
+			"type": "shell",
+			"command": "python espota.py -i ${input:otaDeviceIp} -p 3232 --file build/esp32_keyboard.ino.bin",
+			"group": "build",
+			"problemMatcher": [],
+			"isBackground": false
+		}
+	],
+	"inputs": [
+		{
+			"id": "otaDeviceIp",
+			"type": "promptString",
+			"description": "Digite o IP do ESP32 para OTA"
+		}
+	]
+}

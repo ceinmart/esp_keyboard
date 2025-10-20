@@ -18,7 +18,7 @@ def send_command(command):
 
 if __name__ == "__main__":
     print("Cliente Python para Teclado WiFi USB com ESP32")
-    print("Comandos disponíveis: TYPE:<texto>, PRESS:<tecla> (ex: PRESS:ENTER, PRESS:SHIFT+A)")
+    print("Comandos disponíveis: :type <texto>, :press <tecla> (ex: :press ENTER, :press SHIFT+A)")
     print("Digite 'exit' para sair.")
 
     while True:

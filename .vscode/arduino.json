@@ -1,0 +1,8 @@
+{
+    "configuration": "USBMode=hwcdc,UploadMode=default,PartitionScheme=default_8MB,DebugLevel=none,EraseFlash=none",
+    "board": "esp32:esp32:esp32s3usbotg",
+    "sketch": "esp32_keyboard.ino",
+    "output": "./build",
+    "prebuild": "python gen_version.py",
+    "port": "COM5"
+}
