@@ -3,7 +3,6 @@
 #include "logging.h"
 
 extern USBHIDKeyboard Keyboard;
-extern Config config;
 
 void pressAndRelease(uint8_t k) {
   Keyboard.press(k);

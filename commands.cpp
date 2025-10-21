@@ -13,9 +13,8 @@
 extern USBHIDKeyboard Keyboard;
 extern bool usbAttached;
 extern bool otaEnabled;
-extern Preferences prefs;
-extern Config config;
 extern RsyslogState rsyslog;
+extern Preferences prefs;
 
 // Normaliza comandos antigos
 static String normalizeCommand(const String &cmd) {
@@ -63,9 +62,12 @@ static void cmdStatus(const String&) {
   logMsg(String(F("Log to rsyslog: ")) + (config.logToRsyslog ? F("ON") : F("OFF")));
   logMsg(String(F("Rsyslog server: ")) + config.rsyslogServer);
   if (config.logToRsyslog) {
-    logMsg(String(F("Rsyslog state: ")) +
-      (rsyslog.temporarilyDisabled ? F("DISABLED (too many failures)") :
-       rsyslog.failedAttempts > 0 ? String(F("RETRY (")) + rsyslog.failedAttempts + "/" + config.rsyslogMaxRetries + F(")") : F("OK")));
+    String statusStr =
+    rsyslog.temporarilyDisabled ? String(F("DISABLED (too many failures)")) :
+    (rsyslog.failedAttempts > 0
+      ? (String(F("RETRY (")) + rsyslog.failedAttempts + "/" + config.rsyslogMaxRetries + ")")
+      : String(F("OK")));
+    logMsg(String(F("Rsyslog state: ")) + statusStr);
   }
   logMsg(String(F("SDK: ")) + ESP.getSdkVersion());
   logMsg(String(F("Free heap: ")) + String(ESP.getFreeHeap()) + F(" bytes"));
@@ -265,7 +267,7 @@ void processCommand(const String &incoming) {
   if (it != commandTable.end()) {
     it->second(params);
   } else {
-    logMsg(String(F("Comando desconhecido: "))) + key;
+    logMsg(String(F("Comando desconhecido: ")) + key);
     logMsg(F("Use ':cmd help' para ver opções."));
   }
 }

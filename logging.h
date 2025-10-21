@@ -2,9 +2,7 @@
 #include <Arduino.h>
 #include <WiFiClient.h>
 #include <WiFiUdp.h>
-#include <config.h>
-
-extern Config config;
+#include "config.h"
 
 // Forward decl de estruturas globais
 struct Config;
@@ -20,7 +18,6 @@ void sendToRsyslog(String msg);
 // Externs globais (definidos em main.ino)
 extern bool serialEnabled;
 extern WiFiClient client;
-extern Config config;
 extern RsyslogState rsyslog;
 extern WiFiUDP rsyslogUdp;
 extern const uint16_t rsyslogPort;

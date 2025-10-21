@@ -1,7 +1,6 @@
 #include "wifi_mgr.h"
 #include "logging.h"
 
-extern Config config;
 
 static const unsigned long WIFI_CONNECT_TIMEOUT = 120000; // 2 minutos
 static const unsigned long WIFI_RECHECK_INTERVAL = 120000; // 2 minutos

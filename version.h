@@ -1,8 +1,8 @@
 
 #ifndef VERSION_H
 #define VERSION_H
-#define GIT_COMMIT   "58ecf9f"
-#define GIT_BRANCH   "master"
-#define GIT_DATE     "Sat Oct 4 16:11:33 2025 -0300"
+#define GIT_COMMIT   "dcc265a"
+#define GIT_BRANCH   "versao_reorganizada"
+#define GIT_DATE     "Mon Oct 20 14:44:36 2025 -0300"
 #define GIT_PATH     ""
 #endif

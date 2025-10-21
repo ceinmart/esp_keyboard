@@ -4,7 +4,7 @@
 #include <WiFiClient.h>
 
 // Constante global
-inline constexpr int TCP_BUFFER_SIZE = 50;
+static constexpr int TCP_BUFFER_SIZE = 50;
 
 // Structs
 struct OutputBuffer {

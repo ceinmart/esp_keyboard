@@ -23,7 +23,6 @@ void initLogging() {
 }
 
 void recheckSerial() {
-  static unsigned long lastSerialCheck = 0;
   if (millis() - lastSerialCheck >= 20000) {
     lastSerialCheck = millis();
     if (Serial && Serial.availableForWrite() > 0) {
