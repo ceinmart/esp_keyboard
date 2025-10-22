@@ -14,6 +14,9 @@ void recheckSerial();
 void logMsg(const String &msg);
 void handleRsyslogError(const char *error);
 void sendToRsyslog(String msg);
+// Buffering API for pre-WiFi logs
+void bufferRsyslogMessage(const String &msg);
+void flushBufferedRsyslog();
 
 // Externs globais (definidos em main.ino)
 extern bool serialEnabled;

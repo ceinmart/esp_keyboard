@@ -46,19 +46,19 @@ void logMsg(const String &msg) {
   // Sending to rsyslog may perform DNS resolution which requires the TCP/IP
   // stack; avoid calling it before WiFi is up to prevent calling into
   // lwIP/tcpip APIs from setup context and triggering asserts.
-  if (config.logToRsyslog && WiFi.status() == WL_CONNECTED) {
-    sendToRsyslog(msg);
+  if (config.logToRsyslog) {
+    if (WiFi.status() == WL_CONNECTED) sendToRsyslog(msg);
+    else bufferRsyslogMessage(msg);
   }
 }
 
 void sendToRsyslog(String msg) {
   // Avoid attempting to send if feature disabled or temporarily disabled.
   if (!config.logToRsyslog || rsyslog.temporarilyDisabled) return;
-
   // Ensure WiFi is connected before attempting DNS/UDP operations.
   if (WiFi.status() != WL_CONNECTED) {
-    // Skip sending — caller (logMsg) should have already checked, but
-    // double-check here to be safe.
+    // If we lost WiFi, buffer the message for later.
+    bufferRsyslogMessage(msg);
     return;
   }
 
@@ -114,5 +114,33 @@ void handleRsyslogError(const char *error) {
       client.println(String(F("Rsyslog error (attempt ")) + rsyslog.failedAttempts + F("/") +
                      config.rsyslogMaxRetries + F(": ") + error);
     }
+  }
+}
+
+// Buffer a mensagem no circular OutputBuffer (thread-safe-ish, called from task context)
+void bufferRsyslogMessage(const String &msg) {
+  // Simple ring buffer in config.outputBuffer
+  int idx;
+  if (outputBuffer.count < TCP_BUFFER_SIZE) {
+    idx = (outputBuffer.start + outputBuffer.count) % TCP_BUFFER_SIZE;
+    outputBuffer.lines[idx] = msg;
+    outputBuffer.count++;
+  } else {
+    // overwrite oldest
+    idx = outputBuffer.start;
+    outputBuffer.lines[idx] = msg;
+    outputBuffer.start = (outputBuffer.start + 1) % TCP_BUFFER_SIZE;
+  }
+}
+
+// Flush buffered messages (call after WiFi reconnect)
+void flushBufferedRsyslog() {
+  while (outputBuffer.count > 0) {
+    String m = outputBuffer.lines[outputBuffer.start];
+    sendToRsyslog(m);
+    outputBuffer.start = (outputBuffer.start + 1) % TCP_BUFFER_SIZE;
+    outputBuffer.count--;
+    // small delay to avoid flooding the network
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }

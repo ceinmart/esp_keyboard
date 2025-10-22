@@ -55,7 +55,18 @@ static void cmdStatus(const String&) {
   logMsg(String(F("WiFi IP: ")) + WiFi.localIP().toString());
   logMsg(String(F("WiFi RSSI: ")) + WiFi.RSSI() + F(" dBm"));
   logMsg(String(F("Uptime: ")) + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s");
-  logMsg(String(F("USB HID: ")) + (usbAttached ? F("CONNECTED") : F("DISCONNECTED")));
+  // Report USB connection status per-port when possible. Many boards expose
+  // both a CDC (COM) port and an OTG port. We use a heuristic:
+  // - `serialEnabled` indicates the CDC/COM USB is connected to a host.
+  // - `usbAttached` indicates the HID layer has been initialized.
+  // If HID is attached but CDC is not, we assume the HID is enumerated on
+  // the OTG port.
+  bool comConnected = serialEnabled;
+  bool otgConnected = (usbAttached && !comConnected);
+
+  logMsg(String(F("USB HID (overall): ")) + (usbAttached ? F("CONNECTED") : F("DISCONNECTED")));
+  logMsg(String(F("USB COM (CDC): ")) + (comConnected ? F("CONNECTED") : F("DISCONNECTED")));
+  logMsg(String(F("USB OTG (HID): ")) + (otgConnected ? F("CONNECTED") : F("DISCONNECTED or UNKNOWN")));
   logMsg(String(F("Git: commit ")) + GIT_COMMIT + F(" | branch ") + GIT_BRANCH);
   logMsg(String(F("Build: ")) + GIT_DATE);
   logMsg(String(F("Path: ")) + GIT_PATH);
@@ -96,6 +107,7 @@ static void cmdHelp(const String&) {
   logMsg(F(":cmd hostname <name> - Define o hostname do dispositivo"));
   logMsg(F(":cmd status          - Mostra status atual"));
   logMsg(F(":cmd reset           - Restaura configurações padrão"));
+  logMsg(F(":cmd exit|sair|quit  - Desconecta o cliente TCP conectado"));
   logMsg(F(":cmd usb detach      - Desconecta o HID USB"));
   logMsg(F(":cmd usb attach      - Reconecta o HID USB"));
   logMsg(F(":cmd usb toggle      - Alterna estado USB"));
@@ -200,9 +212,7 @@ static void cmdReset(const String&) {
 
 static void cmdUsbDetach(const String&) {
   if (usbAttached) {
-    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-    Keyboard.end();
-    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+    safeKeyboardEnd();
     usbAttached = false;
     logMsg(F("USB HID desconectado (DETACH)."));
   } else {
@@ -215,9 +225,7 @@ static void cmdUsbAttach(const String&) {
 #if defined(USB)
     USB.begin();
 #endif
-    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-    Keyboard.begin();
-    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+    safeKeyboardBegin();
     usbAttached = true;
     logMsg(F("USB HID reconectado (ATTACH)."));
   } else {
@@ -227,18 +235,14 @@ static void cmdUsbAttach(const String&) {
 
 static void cmdUsbToggle(const String&) {
   if (usbAttached) {
-    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-    Keyboard.end();
-    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+    safeKeyboardEnd();
     usbAttached = false;
     logMsg(F("USB HID toggled -> DISCONNECTED."));
   } else {
 #if defined(USB)
     USB.begin();
 #endif
-    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-    Keyboard.begin();
-    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+    safeKeyboardBegin();
     usbAttached = true;
     logMsg(F("USB HID toggled -> CONNECTED."));
   }
@@ -289,6 +293,10 @@ void initCommands() {
   commandTable["keydelay"]  = cmdKeyDelay;
   commandTable["hostname"]  = cmdHostname;
   commandTable["ota"]       = cmdOta;
+  // Disconnect client aliases
+  commandTable["exit"] = [](const String&){ if (client && client.connected()) { logMsg(F("Desconectando cliente TCP (exit)...")); client.stop(); } else { logMsg(F("Nenhum cliente TCP conectado.")); } };
+  commandTable["sair"] = commandTable["exit"];
+  commandTable["quit"] = commandTable["exit"];
 }
 
 void processCommand(const String &incoming) {
@@ -310,12 +318,18 @@ void processCommand(const String &incoming) {
   // :type (respeitar o texto original após o prefixo)
   if (normalized.startsWith(F(":type "))) {
     String textToType = original;
-    // remover prefixo ":type " da string original (caso usuário tenha usado maiúsculas)
-    if (textToType.startsWith(F(":type ")) || textToType.startsWith(F(":TYPE ")) ) {
+    // suportar várias formas de prefixo que o usuário pode enviar:
+    // ":type <text>", ":TYPE <text>", "type:<text>" e "TYPE:<text>"
+    if (textToType.startsWith(F(":type ")) || textToType.startsWith(F(":TYPE "))) {
+      // remove ":type " (6 chars)
       textToType = textToType.substring(6);
+    } else if (textToType.startsWith(F("type:")) || textToType.startsWith(F("TYPE:"))) {
+      // legacy form without leading colon: "type:<text>" -> remove 5 chars
+      textToType = textToType.substring(5);
     } else {
-      // fallback: usar a parte do normalized se necessário
-      textToType = original.substring(6);
+      // fallback: if original shorter, use empty
+      if (original.length() > 6) textToType = original.substring(6);
+      else textToType = String();
     }
     textToType.trim();
     processAndType(textToType);

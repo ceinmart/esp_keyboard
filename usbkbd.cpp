@@ -11,11 +11,7 @@ void pressAndRelease(uint8_t k) {
     logMsg(F("USB HID não anexado — pressAndRelease ignorado."));
     return;
   }
-  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-  Keyboard.press(k);
-  vTaskDelay(pdMS_TO_TICKS(5));
-  Keyboard.releaseAll();
-  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+  safeKeyboardPress(k);
 }
 
 void handlePressCommand(String keyStr) {
@@ -60,14 +56,15 @@ void handlePressCommand(String keyStr) {
     if (fn >= 1 && fn <= 12) code = KEY_F1 + (fn - 1);
   }
 
-  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-  if (pressCtrl)  Keyboard.press(KEY_LEFT_CTRL);
-  if (pressShift) Keyboard.press(KEY_LEFT_SHIFT);
-  if (pressAlt)   Keyboard.press(KEY_LEFT_ALT);
-  if (pressWin)   Keyboard.press(KEY_LEFT_GUI);
+  if (pressCtrl)  safeKeyboardPress(KEY_LEFT_CTRL);
+  if (pressShift) safeKeyboardPress(KEY_LEFT_SHIFT);
+  if (pressAlt)   safeKeyboardPress(KEY_LEFT_ALT);
+  if (pressWin)   safeKeyboardPress(KEY_LEFT_GUI);
 
-  if (code) Keyboard.press(code);
+  if (code) safeKeyboardPress(code);
   vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
+  // release all -- use mutex directly here
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
   Keyboard.releaseAll();
   if (keyboardMutex) xSemaphoreGive(keyboardMutex);
   logMsg(String(F("Pressionado: ")) + keyStr);
@@ -90,25 +87,41 @@ void processAndType(const String &txt) {
         i += 2;
         continue;
       } else if (next == '\\') {
-  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-  Keyboard.print('\\');
-  vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
-  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+  safeKeyboardPrint("\\");
         i += 2;
         continue;
       } else {
-        if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-        Keyboard.print(next);
-        vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
-        if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+        safeKeyboardPrint(String(next));
         i += 2;
         continue;
       }
     }
-    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-    Keyboard.print(c);
-    vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
-    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+    safeKeyboardPrint(String(c));
     i++;
   }
+}
+
+// Safe wrappers implementation
+void safeKeyboardBegin() {
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
+  Keyboard.begin();
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+}
+
+void safeKeyboardEnd() {
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
+  Keyboard.end();
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+}
+
+void safeKeyboardPrint(const String &s) {
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
+  Keyboard.print(s);
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+}
+
+void safeKeyboardPress(uint8_t k) {
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
+  Keyboard.press(k);
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
 }

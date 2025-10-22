@@ -102,9 +102,7 @@ void setup() {
   }
 
   USB.begin();
-  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
-  Keyboard.begin();
-  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
+  safeKeyboardBegin();
   usbAttached = true;
 
   // WiFi (timeout e rechecagem)
