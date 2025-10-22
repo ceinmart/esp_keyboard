@@ -200,7 +200,9 @@ static void cmdReset(const String&) {
 
 static void cmdUsbDetach(const String&) {
   if (usbAttached) {
+    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
     Keyboard.end();
+    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
     usbAttached = false;
     logMsg(F("USB HID desconectado (DETACH)."));
   } else {
@@ -213,7 +215,9 @@ static void cmdUsbAttach(const String&) {
 #if defined(USB)
     USB.begin();
 #endif
+    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
     Keyboard.begin();
+    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
     usbAttached = true;
     logMsg(F("USB HID reconectado (ATTACH)."));
   } else {
@@ -223,14 +227,18 @@ static void cmdUsbAttach(const String&) {
 
 static void cmdUsbToggle(const String&) {
   if (usbAttached) {
+    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
     Keyboard.end();
+    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
     usbAttached = false;
     logMsg(F("USB HID toggled -> DISCONNECTED."));
   } else {
 #if defined(USB)
     USB.begin();
 #endif
+    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
     Keyboard.begin();
+    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
     usbAttached = true;
     logMsg(F("USB HID toggled -> CONNECTED."));
   }

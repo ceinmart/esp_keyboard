@@ -1,15 +1,28 @@
 #include "usbkbd.h"
 #include <USBHIDKeyboard.h>
 #include "logging.h"
+#include "config.h"
 
 extern USBHIDKeyboard Keyboard;
+extern bool usbAttached;
 
 void pressAndRelease(uint8_t k) {
+  if (!usbAttached) {
+    logMsg(F("USB HID não anexado — pressAndRelease ignorado."));
+    return;
+  }
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
   Keyboard.press(k);
+  vTaskDelay(pdMS_TO_TICKS(5));
   Keyboard.releaseAll();
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
 }
 
 void handlePressCommand(String keyStr) {
+  if (!usbAttached) {
+    logMsg(F("USB HID não anexado — comando :press ignorado."));
+    return;
+  }
   keyStr.trim();
   String s = keyStr;
   s.toUpperCase();
@@ -47,17 +60,25 @@ void handlePressCommand(String keyStr) {
     if (fn >= 1 && fn <= 12) code = KEY_F1 + (fn - 1);
   }
 
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
   if (pressCtrl)  Keyboard.press(KEY_LEFT_CTRL);
   if (pressShift) Keyboard.press(KEY_LEFT_SHIFT);
   if (pressAlt)   Keyboard.press(KEY_LEFT_ALT);
   if (pressWin)   Keyboard.press(KEY_LEFT_GUI);
 
   if (code) Keyboard.press(code);
+  vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
   Keyboard.releaseAll();
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
   logMsg(String(F("Pressionado: ")) + keyStr);
 }
 
 void processAndType(const String &txt) {
+  if (!usbAttached) {
+    logMsg(F("USB HID não anexado — comando de digitação ignorado."));
+    return;
+  }
+
   for (size_t i = 0; i < txt.length();) {
     char c = txt.charAt(i);
     if (c == '\\' && (i + 1) < txt.length()) {
@@ -69,19 +90,25 @@ void processAndType(const String &txt) {
         i += 2;
         continue;
       } else if (next == '\\') {
-        Keyboard.print('\\');
-        vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
+  Keyboard.print('\\');
+  vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
         i += 2;
         continue;
       } else {
+        if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
         Keyboard.print(next);
         vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
+        if (keyboardMutex) xSemaphoreGive(keyboardMutex);
         i += 2;
         continue;
       }
     }
+    if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
     Keyboard.print(c);
     vTaskDelay(pdMS_TO_TICKS(config.keyDelayMs));
+    if (keyboardMutex) xSemaphoreGive(keyboardMutex);
     i++;
   }
 }

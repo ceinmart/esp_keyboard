@@ -1,5 +1,6 @@
 #include "logging.h"
 #include <WiFiUdp.h>
+#include <WiFi.h>
 
 bool serialEnabled = false;
 static unsigned long lastSerialCheck = 0;
@@ -41,13 +42,25 @@ void logMsg(const String &msg) {
   if (client && client.connected()) {
     client.println(msg);
   }
-  if (config.logToRsyslog) {
+  // Only attempt to send to rsyslog if configured and WiFi is connected.
+  // Sending to rsyslog may perform DNS resolution which requires the TCP/IP
+  // stack; avoid calling it before WiFi is up to prevent calling into
+  // lwIP/tcpip APIs from setup context and triggering asserts.
+  if (config.logToRsyslog && WiFi.status() == WL_CONNECTED) {
     sendToRsyslog(msg);
   }
 }
 
 void sendToRsyslog(String msg) {
+  // Avoid attempting to send if feature disabled or temporarily disabled.
   if (!config.logToRsyslog || rsyslog.temporarilyDisabled) return;
+
+  // Ensure WiFi is connected before attempting DNS/UDP operations.
+  if (WiFi.status() != WL_CONNECTED) {
+    // Skip sending — caller (logMsg) should have already checked, but
+    // double-check here to be safe.
+    return;
+  }
 
   if (rsyslog.failedAttempts > 0 &&
       (millis() - rsyslog.lastAttempt) >= RSYSLOG_RETRY_DELAY) {
@@ -77,12 +90,29 @@ void handleRsyslogError(const char *error) {
   rsyslog.failedAttempts++;
   if (rsyslog.failedAttempts >= config.rsyslogMaxRetries) {
     if (!rsyslog.temporarilyDisabled) {
-      logMsg(String(F("Rsyslog disabled after ")) + rsyslog.failedAttempts +
-             F(" failed attempts: ") + error);
+      // Avoid calling logMsg here because that would attempt to resend to
+      // rsyslog and may re-enter this error path. Print directly to Serial
+      // and client instead.
+      if (serialEnabled) {
+        Serial.println(String(F("Rsyslog disabled after ")) + rsyslog.failedAttempts +
+                       F(" failed attempts: ") + error);
+      }
+      if (client && client.connected()) {
+        client.println(String(F("Rsyslog disabled after ")) + rsyslog.failedAttempts +
+                       F(" failed attempts: ") + error);
+      }
       rsyslog.temporarilyDisabled = true;
     }
   } else {
-    logMsg(String(F("Rsyslog error (attempt ")) + rsyslog.failedAttempts + "/" +
-           config.rsyslogMaxRetries + F("): ") + error);
+    // Print error status to serial/client but avoid calling logMsg to
+    // prevent recursion into sendToRsyslog.
+    if (serialEnabled) {
+      Serial.println(String(F("Rsyslog error (attempt ")) + rsyslog.failedAttempts + F("/") +
+                     config.rsyslogMaxRetries + F(": ") + error);
+    }
+    if (client && client.connected()) {
+      client.println(String(F("Rsyslog error (attempt ")) + rsyslog.failedAttempts + F("/") +
+                     config.rsyslogMaxRetries + F(": ") + error);
+    }
   }
 }

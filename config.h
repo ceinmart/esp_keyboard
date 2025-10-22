@@ -2,6 +2,9 @@
 #pragma once
 #include <Arduino.h>
 #include <WiFiClient.h>
+// FreeRTOS semaphore type used to protect USB HID access
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 // Constante global
 static constexpr int TCP_BUFFER_SIZE = 50;
@@ -33,3 +36,5 @@ struct RsyslogState {
 extern OutputBuffer outputBuffer;
 extern Config config;
 extern RsyslogState rsyslog;
+// Mutex to protect Keyboard/USB HID operations across tasks
+extern SemaphoreHandle_t keyboardMutex;

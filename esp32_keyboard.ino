@@ -90,8 +90,21 @@ void setup() {
   }
 
   // USB HID
+  // Ensure the keyboard mutex exists before any Keyboard calls
+  if (keyboardMutex == NULL) {
+    keyboardMutex = xSemaphoreCreateMutex();
+    if (keyboardMutex == NULL) {
+      // If mutex creation fails, log but continue; code paths check for NULL
+      logMsg(F("Falha ao criar keyboardMutex — operações de teclado ficarão sem proteção."));
+    } else {
+      logMsg(F("keyboardMutex criado com sucesso."));
+    }
+  }
+
   USB.begin();
+  if (keyboardMutex) xSemaphoreTake(keyboardMutex, pdMS_TO_TICKS(100));
   Keyboard.begin();
+  if (keyboardMutex) xSemaphoreGive(keyboardMutex);
   usbAttached = true;
 
   // WiFi (timeout e rechecagem)
