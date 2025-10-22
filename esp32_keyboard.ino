@@ -9,6 +9,7 @@
 
 #include "version.h"
 #include "wifi_config.h"
+#include <ArduinoOTA.h>
 
 // Módulos
 #include "logging.h"
@@ -141,6 +142,11 @@ void loop() {
     String command = client.readStringUntil('\n');
     command.trim();
     processCommand(command);
+  }
+
+  // Se OTA habilitado, processar eventos OTA
+  if (otaEnabled) {
+    ArduinoOTA.handle();
   }
 
   // Pequena pausa sem bloquear (melhora preempção)

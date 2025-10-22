@@ -9,6 +9,7 @@
 #include <Preferences.h>
 #include "esp_system.h"
 #include "version.h"
+#include <ArduinoOTA.h>
 
 extern USBHIDKeyboard Keyboard;
 extern bool usbAttached;
@@ -91,6 +92,7 @@ static void cmdHelp(const String&) {
   logMsg(F(":cmd keydelay <ms>   - Ajusta o delay entre teclas (0..1000 ms)"));
   logMsg(F(":cmd logto on|off    - Habilita/desabilita log para rsyslog"));
   logMsg(F(":cmd rsyslog <ip>    - Define servidor rsyslog"));
+  logMsg(F(":cmd ota [on|off]    - Habilita/desabilita atualização OTA (toggle se sem parâmetro)"));
   logMsg(F(":cmd hostname <name> - Define o hostname do dispositivo"));
   logMsg(F(":cmd status          - Mostra status atual"));
   logMsg(F(":cmd reset           - Restaura configurações padrão"));
@@ -100,6 +102,59 @@ static void cmdHelp(const String&) {
   logMsg(F(":cmd reboot          - Reinicia o ESP32"));
   logMsg(F(":cmd help            - Mostra esta ajuda"));
   logMsg(F("----------------------------------"));
+}
+
+static void cmdOta(const String& params) {
+  String p = params; p.trim();
+  if (p == F("on") || p == F("enable")) {
+    if (otaEnabled) {
+      logMsg(F("OTA já está habilitado."));
+      return;
+    }
+    // Configure ArduinoOTA callbacks
+    ArduinoOTA.onStart([]() { logMsg(F("OTA start")); });
+    ArduinoOTA.onEnd([]() { logMsg(F("OTA end")); });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+      logMsg(String(F("OTA progress: ")) + (progress * 100 / total) + "%");
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+      logMsg(String(F("OTA error: ")) + error);
+    });
+    ArduinoOTA.begin();
+    otaEnabled = true;
+    logMsg(F("OTA habilitado."));
+  } else if (p == F("off") || p == F("disable")) {
+    if (!otaEnabled) {
+      logMsg(F("OTA já está desabilitado."));
+      return;
+    }
+#if defined(ArduinoOTA_h)
+    ArduinoOTA.end();
+#endif
+    otaEnabled = false;
+    logMsg(F("OTA desabilitado."));
+  } else {
+    // Toggle
+    if (otaEnabled) {
+#if defined(ArduinoOTA_h)
+      ArduinoOTA.end();
+#endif
+      otaEnabled = false;
+      logMsg(F("OTA desabilitado."));
+    } else {
+      ArduinoOTA.onStart([]() { logMsg(F("OTA start")); });
+      ArduinoOTA.onEnd([]() { logMsg(F("OTA end")); });
+      ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+        logMsg(String(F("OTA progress: ")) + (progress * 100 / total) + "%");
+      });
+      ArduinoOTA.onError([](ota_error_t error) {
+        logMsg(String(F("OTA error: ")) + error);
+      });
+      ArduinoOTA.begin();
+      otaEnabled = true;
+      logMsg(F("OTA habilitado."));
+    }
+  }
 }
 
 static void cmdLogto(const String& params) {
@@ -225,37 +280,51 @@ void initCommands() {
   };
   commandTable["keydelay"]  = cmdKeyDelay;
   commandTable["hostname"]  = cmdHostname;
+  commandTable["ota"]       = cmdOta;
 }
 
 void processCommand(const String &incoming) {
-  String raw = normalizeCommand(incoming);
-  String cmd = raw; cmd.trim();
+  // Preserve o texto original para digitação (mantendo maiúsculas)
+  String original = incoming;
+  original.trim();
 
-  // :press
-  if (cmd.startsWith(F(":press "))) {
-    String keyStr = cmd.substring(7);
+  // Use uma cópia normalizada apenas para detecção de comandos
+  String normalized = normalizeCommand(incoming);
+  normalized.trim();
+
+  // :press (detecção insensível a maiúsc/minusc)
+  if (normalized.startsWith(F(":press "))) {
+    String keyStr = normalized.substring(7);
     handlePressCommand(keyStr);
     return;
   }
 
-  // :type
-  if (cmd.startsWith(F(":type "))) {
-    String textToType = cmd.substring(6);
+  // :type (respeitar o texto original após o prefixo)
+  if (normalized.startsWith(F(":type "))) {
+    String textToType = original;
+    // remover prefixo ":type " da string original (caso usuário tenha usado maiúsculas)
+    if (textToType.startsWith(F(":type ")) || textToType.startsWith(F(":TYPE ")) ) {
+      textToType = textToType.substring(6);
+    } else {
+      // fallback: usar a parte do normalized se necessário
+      textToType = original.substring(6);
+    }
+    textToType.trim();
     processAndType(textToType);
     logMsg(String(F("Digitando: ")) + textToType);
     return;
   }
 
-  // Default: qualquer texto não :cmd é digitado
-  if (!cmd.startsWith(F(":cmd"))) {
-    String textToType = cmd;
+  // Default: qualquer texto que não seja :cmd deve ser digitado (usar original para manter case)
+  if (!normalized.startsWith(F(":cmd"))) {
+    String textToType = original;
     processAndType(textToType);
     logMsg(String(F("Digitando: ")) + textToType);
     return;
   }
 
-  // Remover prefixo ":cmd"
-  String arg = cmd.substring(4);
+  // Remover prefixo ":cmd" (usando normalized para chave sensível a case)
+  String arg = normalized.substring(4);
   arg.trim();
 
   // Separar chave e parâmetros
