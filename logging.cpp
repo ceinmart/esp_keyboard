@@ -243,3 +243,7 @@ void setRsyslogDebug(bool enabled) {
   // Announce the change via standard logging (so it follows normal log flow)
   logMsg(String(F("Rsyslog debug ")) + (enabled ? F("ENABLED") : F("DISABLED")));
 }
+
+bool isRsyslogDebug() {
+  return rsyslogDebug;
+}

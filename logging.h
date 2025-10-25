@@ -17,6 +17,7 @@ void sendToRsyslog(String msg);
 // Rsyslog control
 void enableRsyslog();
 void setRsyslogDebug(bool enabled);
+bool isRsyslogDebug();
 
 // Externs globais (definidos em main.ino)
 extern bool serialEnabled;

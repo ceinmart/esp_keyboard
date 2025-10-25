@@ -76,7 +76,7 @@ static void cmdStatus(const String&) {
     (rsyslog.failedAttempts > 0
       ? (String(F("RETRY (")) + rsyslog.failedAttempts + "/" + config.rsyslogMaxRetries + ")")
       : String(F("OK")));
-    logMsg(String(F("Rsyslog debug: ")) + (rsyslogDebug ? F("ON") : F("OFF")));
+  logMsg(String(F("Rsyslog debug: ")) + (isRsyslogDebug() ? F("ON") : F("OFF")));
     logMsg(String(F("Rsyslog state: ")) + statusStr);
   }
   logMsg(String(F("SDK: ")) + ESP.getSdkVersion());
