@@ -1,3 +1,16 @@
+//
+// Arquivo: esp32_keyboard.ino
+// Teclado USB HID WiFi com ESP32-S3
+// Permite controlar um teclado USB via comandos TCP
+// 
+// Características principais:
+// - Emulação de teclado USB usando USBHIDKeyboard
+// - Controle via TCP (porta 1234)
+// - Suporte a OTA (Over The Air updates)
+// - Logging remoto via rsyslog
+// - Configurações persistentes
+// - Comandos para controle de teclas e configuração
+//
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -7,16 +20,17 @@
 #include <USBHIDKeyboard.h>
 #include "esp_system.h"
 
+// Headers de versão e configuração
 #include "version.h"
 #include "wifi_config.h"
 #include <ArduinoOTA.h>
 
-// Módulos
-#include "logging.h"
-#include "wifi_mgr.h"
-#include "usbkbd.h"
-#include "commands.h"
-#include "config.h"
+// Módulos do sistema
+#include "logging.h"    // Sistema de logging
+#include "wifi_mgr.h"   // Gerenciamento WiFi
+#include "usbkbd.h"     // Interface USB HID
+#include "commands.h"    // Processamento de comandos
+#include "config.h"      // Configurações
 
 extern Config config;
 

@@ -1,9 +1,15 @@
 
+# Arquivo: python_client.py
+# Cliente Python para controle do teclado ESP32 via TCP
+# Permite enviar comandos de digitação e teclas especiais para o ESP32
+# através de uma interface de linha de comando simples.
+
 import socket
 import time
 
-ESP32_IP = "192.168.5.157"  # Substitua pelo IP do seu ESP32
-ESP32_PORT = 1234
+# Configurações de conexão
+ESP32_IP = "192.168.5.157"  # IP do ESP32 (altere para o IP do seu dispositivo)
+ESP32_PORT = 1234           # Porta TCP padrão do serviço
 
 def send_command(command):
     try:
