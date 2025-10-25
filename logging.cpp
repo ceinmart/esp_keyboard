@@ -1,66 +1,99 @@
 #include "logging.h"
 #include <WiFiUdp.h>
 #include <WiFi.h>
+#include <stdio.h>
+
+// Helper: try to parse dotted IPv4 string into IPAddress. Returns true on success.
+static bool parseIPv4(const String &s, IPAddress &out) {
+  unsigned int a = 0, b = 0, c = 0, d = 0;
+  int matched = sscanf(s.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d);
+  if (matched == 4 && a <= 255 && b <= 255 && c <= 255 && d <= 255) {
+    out = IPAddress((uint8_t)a, (uint8_t)b, (uint8_t)c, (uint8_t)d);
+    return true;
+  }
+  return false;
+}
 
 bool serialEnabled = false;
 static unsigned long lastSerialCheck = 0;
 const unsigned long SERIAL_RECHECK_INTERVAL = 20000; // 20s
+// Diagnostic counter for rsyslog sends
+static uint32_t rsyslogSendCounter = 0;
+static String rsyslogLastMsg = String();
+static unsigned long rsyslogLastSendTime = 0;
+// Sequence counter and debug flag to help diagnose server-side duplication
+static uint32_t rsyslogSeq = 0;
+static bool rsyslogDebug = false;
 
 void initLogging() {
   Serial.begin(115200);
-
+  Serial.setDebugOutput(true);  // Enable debug output
+  
   unsigned long start = millis();
-  while (millis() - start < 2000) {
-    if (Serial && Serial.availableForWrite() > 0) {
+  // Wait up to 3 seconds for serial connection
+  while (millis() - start < 3000) {
+    if (Serial) {
       serialEnabled = true;
       break;
     }
-    delay(10);
+    delay(100);
   }
 
   if (serialEnabled) {
     Serial.println(F("Serial conectado, logs habilitados."));
+  } else {
+    // If the CDC serial is not available, still print to the ROM UART
+    Serial.println(F("Serial não detectado no timeout inicial."));
+    printf("Serial não detectado no timeout inicial.\n");
   }
+  
+  // Force flush any pending data
+  Serial.flush();
 }
 
 void recheckSerial() {
-  if (millis() - lastSerialCheck >= 20000) {
+  if (millis() - lastSerialCheck >= SERIAL_RECHECK_INTERVAL) {
     lastSerialCheck = millis();
-    if (Serial && Serial.availableForWrite() > 0) {
+    
+    // Check if Serial is actually available
+    if (Serial) {
       if (!serialEnabled) {
+        serialEnabled = true;
         Serial.println(F("Serial conectado após boot, logs habilitados."));
+        Serial.flush();
       }
-      serialEnabled = true;
+    } else {
+      if (serialEnabled) {
+        serialEnabled = false;
+        // Don't try to print since serial is not available
+      }
     }
   }
 }
 
 void logMsg(const String &msg) {
+  // Print to CDC serial when available, otherwise print to ROM UART
   if (serialEnabled) {
     Serial.println(msg);
+  } else {
+    // Fallback to ROM UART (visible on the same COM that shows boot logs)
+    printf("%s\n", msg.c_str());
   }
+
   if (client && client.connected()) {
     client.println(msg);
   }
-  // Only attempt to send to rsyslog if configured and WiFi is connected.
-  // Sending to rsyslog may perform DNS resolution which requires the TCP/IP
-  // stack; avoid calling it before WiFi is up to prevent calling into
-  // lwIP/tcpip APIs from setup context and triggering asserts.
-  if (config.logToRsyslog) {
-    if (WiFi.status() == WL_CONNECTED) sendToRsyslog(msg);
-    else bufferRsyslogMessage(msg);
+
+  // Only send to rsyslog if enabled and WiFi is connected
+  if (config.logToRsyslog && WiFi.status() == WL_CONNECTED) {
+    sendToRsyslog(msg);
   }
 }
 
 void sendToRsyslog(String msg) {
-  // Avoid attempting to send if feature disabled or temporarily disabled.
-  if (!config.logToRsyslog || rsyslog.temporarilyDisabled) return;
-  // Ensure WiFi is connected before attempting DNS/UDP operations.
-  if (WiFi.status() != WL_CONNECTED) {
-    // If we lost WiFi, buffer the message for later.
-    bufferRsyslogMessage(msg);
-    return;
-  }
+  // Exit early if logging disabled or in failed state
+  if (!rsyslog.enabled || !config.logToRsyslog || rsyslog.temporarilyDisabled) return;
+  if (WiFi.status() != WL_CONNECTED) return;
 
   if (rsyslog.failedAttempts > 0 &&
       (millis() - rsyslog.lastAttempt) >= RSYSLOG_RETRY_DELAY) {
@@ -68,21 +101,75 @@ void sendToRsyslog(String msg) {
   }
 
   rsyslog.lastAttempt = millis();
-  if (!rsyslogUdp.beginPacket(config.rsyslogServer.c_str(), rsyslogPort)) {
-    handleRsyslogError("Failed to begin UDP packet");
-    return;
+
+  // Prepare outgoing message (may add seq prefix in debug mode)
+  String out = msg;
+  if (rsyslogDebug) {
+    rsyslogSeq++;
+    out = String(F("[SEQ:")) + String(rsyslogSeq) + F("] ") + out;
+  }
+  // Add newline if not present for proper syslog format
+  if (!out.endsWith("\n")) {
+    out += "\n";
   }
 
-  rsyslogUdp.write((const uint8_t *)msg.c_str(), msg.length());
+  // Prefer sending directly to an IPAddress if the configured server is a dotted IPv4
+  IPAddress ip;
+  bool usedIp = false;
+  if (parseIPv4(config.rsyslogServer, ip)) {
+    usedIp = true;
+    if (!rsyslogUdp.beginPacket(ip, rsyslogPort)) {
+      if (serialEnabled) Serial.printf("beginPacket(IP %s:%d) failed\n", config.rsyslogServer.c_str(), rsyslogPort);
+      else printf("beginPacket(IP %s:%d) failed\n", config.rsyslogServer.c_str(), rsyslogPort);
+      handleRsyslogError("Failed to begin UDP packet (ip)");
+      return;
+    }
+  } else {
+    if (!rsyslogUdp.beginPacket(config.rsyslogServer.c_str(), rsyslogPort)) {
+      if (serialEnabled) Serial.printf("beginPacket(host %s:%d) failed\n", config.rsyslogServer.c_str(), rsyslogPort);
+      else printf("beginPacket(host %s:%d) failed\n", config.rsyslogServer.c_str(), rsyslogPort);
+      handleRsyslogError("Failed to begin UDP packet (host)");
+      return;
+    }
+  }
+
+  rsyslogUdp.write((const uint8_t *)out.c_str(), out.length());
+
+  // Diagnostic: increment counter and detect quick duplicates (only when debug enabled)
+  if (rsyslogDebug) {
+    rsyslogSendCounter++;
+    unsigned long now = millis();
+    bool quickDup = (rsyslogLastMsg == out && (now - rsyslogLastSendTime) < 50);
+    rsyslogLastMsg = out;
+    rsyslogLastSendTime = now;
+    if (serialEnabled) {
+      Serial.printf("RSYSLOG SEND #%u %s %s", rsyslogSendCounter, config.rsyslogServer.c_str(), out.c_str());
+      if (quickDup) Serial.println(F("[QUICK DUP DETECTED]"));
+    } else {
+      printf("RSYSLOG SEND #%u %s %s", rsyslogSendCounter, config.rsyslogServer.c_str(), out.c_str());
+      if (quickDup) printf("[QUICK DUP DETECTED]\n");
+    }
+  }
 
   if (!rsyslogUdp.endPacket()) {
+    // endPacket can fail; provide diagnostic including destination form
+    if (serialEnabled) {
+      if (usedIp) Serial.printf("endPacket failed to %s (ip)\n", config.rsyslogServer.c_str());
+      else Serial.printf("endPacket failed to %s (host)\n", config.rsyslogServer.c_str());
+    } else {
+      if (usedIp) printf("endPacket failed to %s (ip)\n", config.rsyslogServer.c_str());
+      else printf("endPacket failed to %s (host)\n", config.rsyslogServer.c_str());
+    }
     handleRsyslogError("Failed to send UDP packet");
     return;
   }
 
   if (rsyslog.failedAttempts > 0) {
     rsyslog.failedAttempts = 0;
-    logMsg(F("Rsyslog connection restored"));
+    // Print restoration notice directly to avoid re-entering sendToRsyslog via logMsg
+    if (serialEnabled) Serial.println(F("Rsyslog connection restored"));
+    else printf("Rsyslog connection restored\n");
+    if (client && client.connected()) client.println(F("Rsyslog connection restored"));
   }
 }
 
@@ -117,30 +204,42 @@ void handleRsyslogError(const char *error) {
   }
 }
 
-// Buffer a mensagem no circular OutputBuffer (thread-safe-ish, called from task context)
-void bufferRsyslogMessage(const String &msg) {
-  // Simple ring buffer in config.outputBuffer
-  int idx;
-  if (outputBuffer.count < TCP_BUFFER_SIZE) {
-    idx = (outputBuffer.start + outputBuffer.count) % TCP_BUFFER_SIZE;
-    outputBuffer.lines[idx] = msg;
-    outputBuffer.count++;
-  } else {
-    // overwrite oldest
-    idx = outputBuffer.start;
-    outputBuffer.lines[idx] = msg;
-    outputBuffer.start = (outputBuffer.start + 1) % TCP_BUFFER_SIZE;
+// Re-enable rsyslog after administrator intervention or on demand
+void enableRsyslog() {
+  // Reset UDP connection first
+  rsyslogUdp.stop();
+  delay(100); // Small delay to let UDP state settle
+  
+  // Reset state
+  rsyslog.failedAttempts = 0;
+  rsyslog.temporarilyDisabled = false;
+  rsyslog.enabled = config.logToRsyslog;
+  rsyslog.lastAttempt = millis();
+  
+  // Try to send a test message
+  String testMsg = String(F("Rsyslog re-enabled on ")) + config.hostname + F(" at ") + String(millis());
+  
+  // Only emit the explicit re-enable/test diagnostics when debug mode is active
+  if (rsyslogDebug) {
+    if (serialEnabled) {
+      Serial.println(F("Rsyslog explicitly re-enabled"));
+      Serial.println(F("Sending test message..."));
+    } else {
+      printf("Rsyslog explicitly re-enabled\n");
+      printf("Sending test message...\n");
+    }
+    if (client && client.connected()) {
+      client.println(F("Rsyslog explicitly re-enabled"));
+      client.println(F("Sending test message..."));
+    }
   }
+  
+  // This will go through sendToRsyslog which has all the proper checks
+  logMsg(testMsg);
 }
 
-// Flush buffered messages (call after WiFi reconnect)
-void flushBufferedRsyslog() {
-  while (outputBuffer.count > 0) {
-    String m = outputBuffer.lines[outputBuffer.start];
-    sendToRsyslog(m);
-    outputBuffer.start = (outputBuffer.start + 1) % TCP_BUFFER_SIZE;
-    outputBuffer.count--;
-    // small delay to avoid flooding the network
-    vTaskDelay(pdMS_TO_TICKS(10));
-  }
+void setRsyslogDebug(bool enabled) {
+  rsyslogDebug = enabled;
+  // Announce the change via standard logging (so it follows normal log flow)
+  logMsg(String(F("Rsyslog debug ")) + (enabled ? F("ENABLED") : F("DISABLED")));
 }

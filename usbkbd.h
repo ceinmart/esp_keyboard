@@ -14,4 +14,11 @@ void processAndType(const String &txt);
 void safeKeyboardBegin();
 void safeKeyboardEnd();
 void safeKeyboardPrint(const String &s);
-void safeKeyboardPress(uint8_t k);
+
+// Higher-level keyboard actions
+// Tap: press then release (default behavior)
+void safeKeyboardTap(uint8_t k, uint16_t holdMs = 0);
+// Hold: press the key and keep it held until safeKeyboardRelease is called
+void safeKeyboardHold(uint8_t k);
+// Release a held key
+void safeKeyboardRelease(uint8_t k);

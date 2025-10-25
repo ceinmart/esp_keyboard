@@ -56,17 +56,14 @@ static void cmdStatus(const String&) {
   logMsg(String(F("WiFi RSSI: ")) + WiFi.RSSI() + F(" dBm"));
   logMsg(String(F("Uptime: ")) + uptimeHour + "h " + uptimeMin + "m " + uptimeSec + "s");
   // Report USB connection status per-port when possible. Many boards expose
-  // both a CDC (COM) port and an OTG port. We use a heuristic:
-  // - `serialEnabled` indicates the CDC/COM USB is connected to a host.
-  // - `usbAttached` indicates the HID layer has been initialized.
-  // If HID is attached but CDC is not, we assume the HID is enumerated on
-  // the OTG port.
-  bool comConnected = serialEnabled;
-  bool otgConnected = (usbAttached && !comConnected);
+  // both a CDC (COM) port and an OTG port.
+  // Check actual Serial connection status instead of just the flag
+  bool comConnected = Serial ? true : false;
+  bool otgConnected = usbAttached; // OTG port status is tracked independently
 
   logMsg(String(F("USB HID (overall): ")) + (usbAttached ? F("CONNECTED") : F("DISCONNECTED")));
   logMsg(String(F("USB COM (CDC): ")) + (comConnected ? F("CONNECTED") : F("DISCONNECTED")));
-  logMsg(String(F("USB OTG (HID): ")) + (otgConnected ? F("CONNECTED") : F("DISCONNECTED or UNKNOWN")));
+  logMsg(String(F("USB OTG (HID): ")) + (otgConnected ? F("CONNECTED") : F("DISCONNECTED")));
   logMsg(String(F("Git: commit ")) + GIT_COMMIT + F(" | branch ") + GIT_BRANCH);
   logMsg(String(F("Build: ")) + GIT_DATE);
   logMsg(String(F("Path: ")) + GIT_PATH);
@@ -79,6 +76,7 @@ static void cmdStatus(const String&) {
     (rsyslog.failedAttempts > 0
       ? (String(F("RETRY (")) + rsyslog.failedAttempts + "/" + config.rsyslogMaxRetries + ")")
       : String(F("OK")));
+    logMsg(String(F("Rsyslog debug: ")) + (rsyslogDebug ? F("ON") : F("OFF")));
     logMsg(String(F("Rsyslog state: ")) + statusStr);
   }
   logMsg(String(F("SDK: ")) + ESP.getSdkVersion());
@@ -103,6 +101,8 @@ static void cmdHelp(const String&) {
   logMsg(F(":cmd keydelay <ms>   - Ajusta o delay entre teclas (0..1000 ms)"));
   logMsg(F(":cmd logto on|off    - Habilita/desabilita log para rsyslog"));
   logMsg(F(":cmd rsyslog <ip>    - Define servidor rsyslog"));
+  logMsg(F(":cmd rsyslog enable  - Re-enable rsyslog (clears failures and sends test message)"));
+  logMsg(F(":cmd rsyslog debug on|off - Toggle rsyslog debug sequence/log sends"));
   logMsg(F(":cmd ota [on|off]    - Habilita/desabilita atualização OTA (toggle se sem parâmetro)"));
   logMsg(F(":cmd hostname <name> - Define o hostname do dispositivo"));
   logMsg(F(":cmd status          - Mostra status atual"));
@@ -173,9 +173,13 @@ static void cmdLogto(const String& params) {
   String p = params; p.trim();
   if (p == F("on")) {
     config.logToRsyslog = true;
+    rsyslog.enabled = true;
     logMsg(F("Log para rsyslog ativado."));
+    // Also enable rsyslog to ensure clean state
+    enableRsyslog();
   } else if (p == F("off")) {
     config.logToRsyslog = false;
+    rsyslog.enabled = false;
     logMsg(F("Log para rsyslog desativado."));
   } else {
     logMsg(F("Opção inválida para logto. Use ':cmd logto on' ou ':cmd logto off'."));
@@ -187,14 +191,41 @@ static void cmdLogto(const String& params) {
 }
 
 static void cmdRsyslog(const String& params) {
-  String server = params; server.trim();
-  if (server.length() == 0) {
-    logMsg(F("Servidor rsyslog inválido."));
+  String p = params; p.trim();
+
+  if (p == F("enable")) {
+    enableRsyslog();
     return;
   }
-  config.rsyslogServer = server;
+
+  // debug toggle: ':cmd rsyslog debug on' or 'debug off'
+  if (p.startsWith(F("debug"))) {
+    String sub = p.substring(5); sub.trim();
+    if (sub == F("on") || sub == F("enable")) {
+      setRsyslogDebug(true);
+      return;
+    } else if (sub == F("off") || sub == F("disable")) {
+      setRsyslogDebug(false);
+      return;
+    } else {
+      logMsg(F("Uso: :cmd rsyslog <ip_or_host> | enable | debug on|off"));
+      return;
+    }
+  }
+
+  // If not enable command, treat as server address update
+  if (p.length() == 0) {
+    logMsg(F("Uso: :cmd rsyslog <ip_or_host> | enable"));
+    return;
+  }
+
+  config.rsyslogServer = p;
   extern void saveConfig();
   saveConfig();
+  
+  // Also re-enable rsyslog to apply the new server immediately
+  enableRsyslog();
+  
   logMsg(String(F("Servidor rsyslog configurado para: ")) + config.rsyslogServer);
 }
 

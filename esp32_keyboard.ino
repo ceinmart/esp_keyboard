@@ -77,7 +77,13 @@ void saveConfig() {
 }
 
 void setup() {
-  // Logging (inicial + checagem Serial)
+  // Application start marker (always printed to ROM UART)
+  printf("APP START: esp32_keyboard starting...\n");
+  // Initialize USB stack first
+  USB.begin();
+  delay(100);  // Give USB time to initialize
+  
+  // Initialize Serial and logging
   initLogging();
 
   // Config
@@ -101,9 +107,17 @@ void setup() {
     }
   }
 
-  USB.begin();
+  // Initialize keyboard after USB
   safeKeyboardBegin();
   usbAttached = true;
+  
+  // Force Serial reinit after USB setup
+  if (!Serial) {
+    Serial.end();
+    delay(100);
+    Serial.begin(115200);
+    delay(100);
+  }
 
   // WiFi (timeout e rechecagem)
   initWiFi(ssid, password);

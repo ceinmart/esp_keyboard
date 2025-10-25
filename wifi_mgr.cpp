@@ -16,11 +16,11 @@ void initWiFi(const char* ssid, const char* password) {
     if (serialEnabled) Serial.print(F("."));
   }
 
-  if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED) {
     logMsg(F("WiFi conectado!"));
     logMsg(String(F("Endereço IP: ")) + WiFi.localIP().toString());
-    // Flush any buffered rsyslog messages queued before WiFi was ready
-    flushBufferedRsyslog();
+    // No buffering implemented now - new messages will be sent directly
+    logMsg(F("Rsyslog: WiFi up, new messages will be sent directly (no buffer)"));
   } else {
     logMsg(F("Falha ao conectar WiFi (timeout de 2 minutos)."));
   }
@@ -42,8 +42,7 @@ void handleWiFi() {
       if (WiFi.status() == WL_CONNECTED) {
         logMsg(F("WiFi reconectado com sucesso!"));
         logMsg(String(F("Endereço IP: ")) + WiFi.localIP().toString());
-        // Flush messages buffered while offline
-        flushBufferedRsyslog();
+        logMsg(F("Rsyslog: WiFi reconnected, new messages will be sent directly (no buffer)"));
       } else {
         logMsg(F("Falha ao reconectar WiFi (timeout de 2 minutos)."));
       }
