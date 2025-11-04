@@ -363,16 +363,22 @@ void processCommand(const String &incoming) {
       else textToType = String();
     }
     textToType.trim();
-    processAndType(textToType);
+    // Log the text being typed BEFORE sending it to the HID layer so the
+    // serial/TCP/rsyslog output shows the high-level action first. This
+    // prevents per-character/special-key logs (like "Pressionado: ENTER")
+    // from appearing before the overall "Digitando" message.
     logMsg(String(F("Digitando: ")) + textToType);
+    processAndType(textToType);
     return;
   }
 
   // Default: qualquer texto que não seja :cmd deve ser digitado (usar original para manter case)
   if (!normalized.startsWith(F(":cmd"))) {
     String textToType = original;
-    processAndType(textToType);
+    // See note above: log the high-level action before issuing individual
+    // keypresses so logs remain readable and in intuitive order.
     logMsg(String(F("Digitando: ")) + textToType);
+    processAndType(textToType);
     return;
   }
 
