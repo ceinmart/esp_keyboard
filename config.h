@@ -28,6 +28,14 @@ struct Config {
   unsigned long bootTime;         // Timestamp do início do sistema
   uint8_t rsyslogMaxRetries;     // Número máximo de tentativas antes de desabilitar rsyslog
   uint16_t keyDelayMs;           // Atraso entre pressionamentos de tecla em milissegundos
+  // Configurações MQTT
+  bool mqttEnabled;               // Se verdadeiro, conecta ao broker MQTT
+  String mqttServer;              // Endereço IP ou hostname do broker MQTT
+  uint16_t mqttPort;              // Porta do broker MQTT
+  String mqttUser;                // Usuário para autenticação MQTT
+  String mqttPassword;            // Senha para autenticação MQTT
+  String mqttBaseTopic;           // Tópico base para publicação e subscrição
+  bool logToMqtt;                 // Se verdadeiro, envia logs para o tópico MQTT
 };
 
 // Estado do sistema de log remoto (rsyslog)

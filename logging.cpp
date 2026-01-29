@@ -1,4 +1,5 @@
 #include "logging.h"
+#include "mqtt_mgr.h"
 #include <WiFiUdp.h>
 #include <WiFi.h>
 #include <stdio.h>
@@ -87,6 +88,12 @@ void logMsg(const String &msg) {
   // Only send to rsyslog if enabled and WiFi is connected
   if (config.logToRsyslog && WiFi.status() == WL_CONNECTED) {
     sendToRsyslog(msg);
+  }
+
+  // Apenas envia para MQTT se habilitado, conectado ao WiFi e ao Broker
+  if (config.logToMqtt && WiFi.status() == WL_CONNECTED) {
+    // A função publishMqtt já verifica se o cliente está conectado
+    publishMqtt("log", msg, false);
   }
 }
 

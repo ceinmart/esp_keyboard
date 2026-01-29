@@ -31,6 +31,10 @@
 #include "usbkbd.h"     // Interface USB HID
 #include "commands.h"    // Processamento de comandos
 #include "config.h"      // Configurações
+#include "mqtt_mgr.h"   // Gerenciamento MQTT
+
+#include <PubSubClient.h>
+extern PubSubClient mqttClient;
 
 extern Config config;
 
@@ -68,6 +72,16 @@ void loadConfig() {
   config.hostname = prefs.getString("hostname", "esp32kbd");
   config.rsyslogMaxRetries = prefs.getUChar("rsyslogRetries", 3);
   config.keyDelayMs = prefs.getUShort("keyDelayMs", 20);
+
+  // Carrega configurações MQTT
+  config.mqttEnabled = prefs.getBool("mqttEnabled", false);
+  config.mqttServer = prefs.getString("mqttServer", "");
+  config.mqttPort = prefs.getUShort("mqttPort", 1883);
+  config.mqttUser = prefs.getString("mqttUser", "");
+  config.mqttPassword = prefs.getString("mqttPassword", "");
+  config.mqttBaseTopic = prefs.getString("mqttBaseTopic", "esp32kbd");
+  config.logToMqtt = prefs.getBool("logToMqtt", false);
+  
   prefs.end();
 
   rsyslog.enabled = config.logToRsyslog;
@@ -86,6 +100,16 @@ void saveConfig() {
   prefs.putString("rsyslogServer", config.rsyslogServer);
   prefs.putString("hostname", config.hostname);
   prefs.putUShort("keyDelayMs", config.keyDelayMs);
+
+  // Salva configurações MQTT
+  prefs.putBool("mqttEnabled", config.mqttEnabled);
+  prefs.putString("mqttServer", config.mqttServer);
+  prefs.putUShort("mqttPort", config.mqttPort);
+  prefs.putString("mqttUser", config.mqttUser);
+  prefs.putString("mqttPassword", config.mqttPassword);
+  prefs.putString("mqttBaseTopic", config.mqttBaseTopic);
+  prefs.putBool("logToMqtt", config.logToMqtt);
+  
   prefs.end();
   logMsg(F("Configuration saved"));
 }
@@ -144,6 +168,9 @@ void setup() {
   // Comandos
   initCommands();
 
+  // MQTT
+  initMqtt();
+
   // Banner inicial
   logMsg(F("=== ESP32 Keyboard Controller ==="));
   logMsg(String(F("Device: ")) + config.hostname);
@@ -153,6 +180,9 @@ void setup() {
 }
 
 void loop() {
+  // Gerenciador de conexão MQTT
+  handleMqtt();
+
   // Rechecagem serial (20s) e WiFi (2 min)
   recheckSerial();
   handleWiFi();

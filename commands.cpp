@@ -10,6 +10,9 @@
 #include "esp_system.h"
 #include "version.h"
 #include <ArduinoOTA.h>
+#include <PubSubClient.h>
+
+extern PubSubClient mqttClient;
 
 extern USBHIDKeyboard Keyboard;
 extern bool usbAttached;
@@ -79,6 +82,15 @@ static void cmdStatus(const String&) {
   logMsg(String(F("Rsyslog debug: ")) + (isRsyslogDebug() ? F("ON") : F("OFF")));
     logMsg(String(F("Rsyslog state: ")) + statusStr);
   }
+  logMsg(F("--- MQTT Config ---"));
+  logMsg(String(F("MQTT Habilitado: ")) + (config.mqttEnabled ? F("ON") : F("OFF")));
+  if (config.mqttEnabled) {
+    logMsg(String(F("MQTT Estado: ")) + (mqttClient.connected() ? F("CONECTADO") : F("DESCONECTADO")));
+    logMsg(String(F("MQTT Servidor: ")) + config.mqttServer + F(":") + String(config.mqttPort));
+    logMsg(String(F("MQTT Usuário: ")) + config.mqttUser);
+    logMsg(String(F("MQTT Tópico Base: ")) + config.mqttBaseTopic);
+    logMsg(String(F("Log para MQTT: ")) + (config.logToMqtt ? F("ON") : F("OFF")));
+  }
   logMsg(String(F("SDK: ")) + ESP.getSdkVersion());
   logMsg(String(F("Free heap: ")) + String(ESP.getFreeHeap()) + F(" bytes"));
   if (psramFound()) {
@@ -113,6 +125,14 @@ static void cmdHelp(const String&) {
   logMsg(F(":cmd usb toggle      - Alterna estado USB"));
   logMsg(F(":cmd reboot          - Reinicia o ESP32"));
   logMsg(F(":cmd help            - Mostra esta ajuda"));
+  logMsg(F("--- Comandos MQTT ---"));
+  logMsg(F(":cmd mqtt on|off      - Habilita/desabilita o cliente MQTT"));
+  logMsg(F(":cmd mqtt_server <ip> - Define o servidor MQTT"));
+  logMsg(F(":cmd mqtt_port <port> - Define a porta do servidor MQTT (padrão 1883)"));
+  logMsg(F(":cmd mqtt_user <user> - Define o usuário para a conexão MQTT"));
+  logMsg(F(":cmd mqtt_pass <pass> - Define a senha para a conexão MQTT"));
+  logMsg(F(":cmd mqtt_topic <top> - Define o tópico base para comandos"));
+  logMsg(F(":cmd mqtt_log on|off  - Habilita/desabilita log para o tópico MQTT"));
   logMsg(F("----------------------------------"));
 }
 
@@ -306,6 +326,80 @@ static void cmdHostname(const String& params) {
   }
 }
 
+// --- Funções de comando MQTT ---
+static void cmdMqtt(const String& params) {
+  String p = params; p.trim();
+  if (p == F("on")) {
+    config.mqttEnabled = true;
+    logMsg(F("Cliente MQTT habilitado."));
+  } else if (p == F("off")) {
+    config.mqttEnabled = false;
+    logMsg(F("Cliente MQTT desabilitado."));
+  } else {
+    logMsg(F("Uso: :cmd mqtt on|off"));
+    return;
+  }
+  extern void saveConfig();
+  saveConfig();
+}
+
+static void cmdMqttServer(const String& params) {
+  config.mqttServer = params;
+  extern void saveConfig();
+  saveConfig();
+  logMsg(String(F("Servidor MQTT configurado para: ")) + config.mqttServer);
+}
+
+static void cmdMqttPort(const String& params) {
+  uint16_t port = params.toInt();
+  if (port > 0) {
+    config.mqttPort = port;
+    extern void saveConfig();
+    saveConfig();
+    logMsg(String(F("Porta MQTT configurada para: ")) + String(config.mqttPort));
+  } else {
+    logMsg(F("Porta MQTT inválida."));
+  }
+}
+
+static void cmdMqttUser(const String& params) {
+  config.mqttUser = params;
+  extern void saveConfig();
+  saveConfig();
+  logMsg(String(F("Usuário MQTT configurado para: ")) + config.mqttUser);
+}
+
+static void cmdMqttPass(const String& params) {
+  config.mqttPassword = params;
+  extern void saveConfig();
+  saveConfig();
+  logMsg(F("Senha MQTT configurada."));
+}
+
+static void cmdMqttTopic(const String& params) {
+  config.mqttBaseTopic = params;
+  extern void saveConfig();
+  saveConfig();
+  logMsg(String(F("Tópico base MQTT configurado para: ")) + config.mqttBaseTopic);
+}
+
+static void cmdMqttLog(const String& params) {
+  String p = params; p.trim();
+  if (p == F("on")) {
+    config.logToMqtt = true;
+    logMsg(F("Log para MQTT habilitado."));
+  } else if (p == F("off")) {
+    config.logToMqtt = false;
+    logMsg(F("Log para MQTT desabilitado."));
+  } else {
+    logMsg(F("Uso: :cmd mqtt_log on|off"));
+    return;
+  }
+  extern void saveConfig();
+  saveConfig();
+}
+
+
 void initCommands() {
   // Comandos :cmd <...>
   commandTable["status"]    = [](const String&){ cmdStatus(""); };
@@ -324,6 +418,14 @@ void initCommands() {
   commandTable["keydelay"]  = cmdKeyDelay;
   commandTable["hostname"]  = cmdHostname;
   commandTable["ota"]       = cmdOta;
+  // Comandos MQTT
+  commandTable["mqtt"] = cmdMqtt;
+  commandTable["mqtt_server"] = cmdMqttServer;
+  commandTable["mqtt_port"] = cmdMqttPort;
+  commandTable["mqtt_user"] = cmdMqttUser;
+  commandTable["mqtt_pass"] = cmdMqttPass;
+  commandTable["mqtt_topic"] = cmdMqttTopic;
+  commandTable["mqtt_log"] = cmdMqttLog;
   // Disconnect client aliases
   commandTable["exit"] = [](const String&){ if (client && client.connected()) { logMsg(F("Desconectando cliente TCP (exit)...")); client.stop(); } else { logMsg(F("Nenhum cliente TCP conectado.")); } };
   commandTable["sair"] = commandTable["exit"];
